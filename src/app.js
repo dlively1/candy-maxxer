@@ -4,7 +4,7 @@ import { geocode } from './geocode.js';
 import { fetchOsm, parseOsm } from './osm.js';
 import { elevations } from './elevation.js';
 import { makeProjection } from './geo.js';
-import { buildNetwork, buildCSR, attachHouses } from './graph.js';
+import { buildNetwork, buildCSR, attachHouses, levelStructures } from './graph.js';
 import { candyValue, OVERRIDES } from './candy.js';
 import { PACES } from './tobler.js';
 import { renderProfile } from './profile.js';
@@ -13,6 +13,7 @@ import { buildSteps, stepText } from './directions.js';
 import { createLoader } from './loader.js';
 import { shareLink } from './share.js';
 import { initPill } from './pill.js';
+import { addressBox, locate } from './address.js';
 
 const $ = (id) => document.getElementById(id);
 const M_PER_MI = 1609.344, FT_PER_M = 3.28084;
@@ -60,6 +61,37 @@ $('form').addEventListener('submit', (e) => { e.preventDefault(); run(); });
 $('share').addEventListener('click', share);
 const pill = initPill(map, $('share'));
 
+// A spot we already have coordinates for (a picked suggestion or "my location"): skip geocoding.
+let pinned = null; // { address, lat, lon }
+const pin = (address, lat, lon) => { pinned = lat == null ? null : { address, lat, lon }; };
+addressBox({
+  input: $('address'),
+  list: $('addr-list'),
+  getBias: () => pinned || area?.start || (({ lat, lng }) => ({ lat, lon: lng }))(map.getCenter()),
+  onPick: (it) => { pin(it.label, it.lat, it.lon); run(); },
+});
+$('locate').addEventListener('click', () => useMyLocation(false));
+
+async function useMyLocation(quiet) {
+  const btn = $('locate');
+  btn.classList.add('busy');
+  try {
+    const here = await locate();
+    $('address').value = here.label;
+    pin(here.label, here.lat, here.lon);
+    run();
+  } catch (e) {
+    // Denied, unavailable, or timed out: the default address is still there to use.
+    if (!quiet) status(e.code === 1 ? 'Location is blocked: allow it in your browser settings, or type an address.' : 'Couldn’t find you. Type an address instead.', true);
+  } finally {
+    btn.classList.remove('busy');
+  }
+}
+
+// Directions are tucked away unless someone wants them; remember their choice.
+$('dirBox').open = localStorage.getItem('cm:dirOpen') === '1';
+$('dirBox').addEventListener('toggle', () => localStorage.setItem('cm:dirOpen', $('dirBox').open ? '1' : '0'));
+
 // Shareable links: ?address=…&min=90&walker=kid&door=30&compare=easy
 const PARAMS = { address: 'address', min: 'budget', walker: 'pace', door: 'porch', compare: 'alt' };
 
@@ -99,7 +131,7 @@ const RADIUS_M = 1000;
 async function loadArea(address) {
   status('Finding address…');
   loader.stage('Finding address…', 0.05);
-  const start = await geocode(address);
+  const start = pinned?.address === address ? { lat: pinned.lat, lon: pinned.lon, label: address } : await geocode(address);
   loader.stage('Fetching houses & streets…', 0.3);
   const osm = await fetchOsm(start.lat, start.lon, RADIUS_M, status);
   const proj = makeProjection(start.lat, start.lon);
@@ -110,7 +142,8 @@ async function loadArea(address) {
   loader.stage(`Measuring hills under ${net.n.toLocaleString()} street points…`, 0.4);
   const all = await elevations([...net.lat.map((la, i) => [la, net.lon[i]]), ...houses.map((h) => [h.lat, h.lon])]);
   const z = all.subarray(0, net.n), houseZ = all.subarray(net.n);
-  const snap = net.grid.nearest(0, 0, 400);
+  levelStructures(net, z);
+  const snap = net.grid.nearest(0, 0, 400, net.walkable);
   if (!snap) throw new Error('That address is too far from any walkable street.');
   return { address, start, proj, net, houses, z, houseZ, startNode: snap.id };
 }
@@ -297,7 +330,8 @@ function renderCompare(routes, budgetMin) {
 
 function renderDirections(g, route, geo) {
   const steps = buildSteps(g, area.net, route.legs);
-  $('dirTitle').textContent = shown.routes.length > 1 ? `Directions: ${route.label}` : 'Directions';
+  $('dirTitle').textContent = shown.routes.length > 1 ? `🧭 Turn-by-turn: ${route.label}` : '🧭 Turn-by-turn directions';
+  $('dirCount').textContent = `${steps.length + 1} steps`;
   const list = $('directions');
   list.innerHTML = steps.map((s) => `<li>${stepText(s)} <small>${Math.round(s.m * FT_PER_M).toLocaleString()} ft${
     s.houses ? ` · ${s.houses} house${s.houses > 1 ? 's' : ''}` : ''}</small></li>`).join('') + '<li>Arrive home 🏠</li>';
@@ -316,4 +350,6 @@ function renderDirections(g, route, geo) {
   });
 }
 
+// Start from a shared link if there is one; otherwise try "here", falling back to the default address.
 if (readUrl()) run();
+else useMyLocation(true);

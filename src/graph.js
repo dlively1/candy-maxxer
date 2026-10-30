@@ -12,6 +12,7 @@ export function buildNetwork(ways, proj) {
   const names = [], nameIdx = new Map();
   const edges = []; // flat: a, b, lengthM, nameId
   const nodeNames = []; // node -> Set of name ids
+  const levels = []; // node chains of bridges/tunnels, whose elevation gets straightened later
 
   const addNode = (la, lo) => {
     const [px, py] = proj.toXY(la, lo);
@@ -25,6 +26,7 @@ export function buildNetwork(ways, proj) {
 
   for (const w of ways) {
     const nid = nameId(w.name);
+    const chain = w.level ? [] : null;
     let prev = -1;
     for (let i = 0; i < w.coords.length; i++) {
       const osmId = w.nodes[i];
@@ -44,16 +46,52 @@ export function buildNetwork(ways, proj) {
             nodeNames[b].add(nid);
           }
           edges.push(a, b, len / pieces, nid);
+          if (chain) { if (!chain.length) chain.push(a); chain.push(b); }
           a = b;
         }
       }
       prev = cur;
     }
+    if (chain?.length > 2) levels.push(chain);
   }
 
   const grid = new Grid(50);
   for (let i = 0; i < x.length; i++) grid.add(i, x[i], y[i]);
-  return { n: x.length, lat, lon, x, y, edges, names, nameIdx, nodeNames, grid };
+  const n = x.length;
+  const { comp, main } = components(n, edges);
+  // Only snap onto the main connected network: OSM often has stray fragments (a highway ramp,
+  // a lone footpath) that would strand a route there.
+  const walkable = (node) => comp[node] === main;
+  return { n, lat, lon, x, y, edges, names, nameIdx, nodeNames, grid, walkable, levels };
+}
+
+// Union-find over the undirected edges; returns each node's component and the largest one.
+function components(n, edges) {
+  const parent = Int32Array.from({ length: n }, (_, i) => i);
+  const find = (a) => { while (parent[a] !== a) a = parent[a] = parent[parent[a]]; return a; };
+  for (let i = 0; i < edges.length; i += 4) {
+    const a = find(edges[i]), b = find(edges[i + 1]);
+    if (a !== b) parent[a] = b;
+  }
+  const comp = new Int32Array(n), size = new Map();
+  for (let i = 0; i < n; i++) { comp[i] = find(i); size.set(comp[i], (size.get(comp[i]) || 0) + 1); }
+  let main = -1, best = -1;
+  for (const [c, k] of size) if (k > best) { best = k; main = c; }
+  return { comp, main };
+}
+
+// Bridges and tunnels: replace the sampled ground elevation along each with a straight ramp
+// between its two ends (mutates z). Otherwise a bridge "dives" into the valley under it and a
+// tunnel "climbs" the hill above it.
+export function levelStructures(net, z) {
+  for (const chain of net.levels) {
+    const d = [0];
+    for (let i = 1; i < chain.length; i++) {
+      d.push(d[i - 1] + Math.hypot(net.x[chain[i]] - net.x[chain[i - 1]], net.y[chain[i]] - net.y[chain[i - 1]]));
+    }
+    const z0 = z[chain[0]], z1 = z[chain.at(-1)], total = d.at(-1) || 1;
+    for (let i = 1; i < chain.length - 1; i++) z[chain[i]] = z0 + (z1 - z0) * (d[i] / total);
+  }
 }
 
 // Directed compressed adjacency. Uphill and downhill get different times (Tobler).
@@ -87,9 +125,9 @@ export function attachHouses(net, houses, houseZ, z, { pace, porchSec }) {
     const street = h.address && h.address.replace(/^\S+\s+/, '');
     const sid = street && net.nameIdx.get(street);
     let snap = sid !== undefined && sid !== null
-      ? net.grid.nearest(h.x, h.y, 120, (node) => net.nodeNames[node].has(sid))
+      ? net.grid.nearest(h.x, h.y, 120, (node) => net.walkable(node) && net.nodeNames[node].has(sid))
       : null;
-    if (!snap) snap = net.grid.nearest(h.x, h.y, 120);
+    if (!snap) snap = net.grid.nearest(h.x, h.y, 120, net.walkable);
     if (!snap) return;
     const path = Math.max(3, snap.dist - 11); // ~4m road half-width + ~7m from front door to centroid
     const dz = houseZ[i] - z[snap.id];

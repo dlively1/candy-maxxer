@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Candy Maxxer</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎃</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Creepster&family=Mystery+Quest&display=swap">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="loader.css">
@@ -12,12 +15,20 @@
 <body>
   <aside id="panel">
     <h1>🎃 Candy Maxxer</h1>
-    <p class="tag">The most candy per minute, hills included.</p>
+    <p class="tag">The most candy per minute.</p>
 
     <form id="form">
-      <label>Start address
-        <input id="address" value="301 Shiloh St, Pittsburgh, PA" placeholder="Street address, city, state" autocomplete="street-address" required>
-      </label>
+      <div class="field">
+        <label for="address">Start address</label>
+        <div class="bone">
+          <svg class="bone-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>
+          <input id="address" value="301 Shiloh St, Pittsburgh, PA" placeholder="Where do you start?" autocomplete="off" spellcheck="false" required>
+          <button id="locate" type="button" title="Use my location" aria-label="Use my location">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <ul id="addr-list" class="ac-list" role="listbox" hidden></ul>
+      </div>
       <label>Time out <output id="budgetOut">90 min</output>
         <input id="budget" type="range" min="30" max="180" step="15" value="90">
       </label>
@@ -52,14 +63,16 @@
         <figcaption>Elevation along route</figcaption>
         <div id="profile"></div>
       </figure>
-      <h2 id="dirTitle">Directions</h2>
-      <ol id="directions"></ol>
+      <details id="dirBox">
+        <summary><span id="dirTitle">🧭 Turn-by-turn directions</span> <small id="dirCount"></small></summary>
+        <ol id="directions"></ol>
+      </details>
     </section>
 
     <footer>
       Tap a route in the table to follow it. Click a house to mark it ⭐ full-size or 🌑 dark porch.
       Data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>,
-      elevation: AWS Terrain Tiles, geocoding: US Census.
+      elevation: AWS Terrain Tiles, address search: Photon &amp; US Census.
     </footer>
   </aside>
   <main id="stage">

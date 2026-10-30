@@ -5,11 +5,13 @@ and gets you home — with hills priced in.
 
 ## How it works
 
-1. **Geocode** — US Census geocoder (JSONP), Nominatim fallback.
+1. **Start** — your location (browser geolocation, named via Photon reverse geocoding), a type-ahead
+   pick (Photon, biased toward you), or a typed address (US Census geocoder via JSONP, Nominatim fallback).
 2. **Houses & streets** — one Overpass (OpenStreetMap) query, 1 km radius, cached in `localStorage`.
 3. **Elevation** — AWS Terrain Tiles (Terrarium PNGs, USGS 3DEP ~10 m), decoded in the browser.
 4. **Walking graph** — streets densified to ≤20 m; each edge timed with Tobler's hiking function,
-   separately uphill and downhill. Each house adds a front-path round trip + porch time.
+   separately uphill and downhill. Bridges and tunnels ramp straight between their ends (the terrain
+   is the ground, not the deck), and routes only start on the main connected network. Each house adds a front-path round trip + porch time.
 5. **Solver** (Web Worker) — orienteering problem: greedy candy-per-second insertion, asymmetric 2-opt,
    relocate, then ~0.4 s of iterated local search (tear out a stretch, rebuild, keep if better).
 6. **Compare** — a second route next to Max Candy: *Easier legs* (climbing is charged against the haul;

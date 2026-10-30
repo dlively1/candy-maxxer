@@ -68,14 +68,15 @@ function clearOldCache() {
 
 const NOT_WALKABLE = new Set([
   'motorway', 'motorway_link', 'trunk', 'trunk_link', 'construction', 'proposed',
-  'raceway', 'bus_guideway', 'track', 'bridleway', 'cycleway', 'corridor', 'elevator', 'platform',
+  'raceway', 'bus_guideway', 'busway', 'track', 'bridleway', 'cycleway', 'corridor', 'elevator', 'platform',
 ]);
+const FOOT_OK = new Set(['yes', 'designated', 'permissive']);
 
 export function isWalkable(tags) {
-  const hw = tags.highway;
-  if (!hw || NOT_WALKABLE.has(hw)) return false;
+  const hw = tags.highway, footOk = FOOT_OK.has(tags.foot);
+  if (!hw || (NOT_WALKABLE.has(hw) && !footOk)) return false; // e.g. a trail tagged cycleway + foot=designated
   if (tags.area === 'yes') return false;
-  if (tags.foot === 'no' || (tags.access === 'private' && tags.foot !== 'yes')) return false;
+  if (tags.foot === 'no' || (['no', 'private'].includes(tags.access) && !footOk)) return false;
   if (hw === 'service' && tags.service === 'parking_aisle') return false;
   return true;
 }
@@ -105,6 +106,8 @@ export function parseOsm(data, proj) {
         coords: el.geometry.map((g) => [g.lat, g.lon]),
         name: wayName(tags),
         highway: tags.highway,
+        // Terrain data is the ground surface: wrong for a bridge deck or a tunnel floor.
+        level: (tags.bridge && tags.bridge !== 'no') || (tags.tunnel && tags.tunnel !== 'no'),
       });
     } else if (el.type === 'way' && tags.building && el.geometry) {
       const h = parseHouse(el, proj);

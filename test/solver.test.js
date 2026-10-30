@@ -12,6 +12,12 @@ test('fixture parses into houses and a walkable network', () => {
   assert.ok(real.net.n > 1000);
 });
 
+test('every house and the start sit on one connected network', () => {
+  const { net, hs, startNode } = real;
+  assert.ok(net.walkable(startNode));
+  assert.ok(hs.every((h) => net.walkable(h.node)));
+});
+
 test('real terrain is hilly (Mount Washington)', () => {
   const zs = [...real.z];
   assert.ok(Math.max(...zs) - Math.min(...zs) > 50, 'expected > 50 m of relief');
