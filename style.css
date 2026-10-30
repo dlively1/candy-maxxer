@@ -35,25 +35,21 @@ h2 { margin: 6px 0 0; font-size: 14px; color: var(--ink-2); text-transform: uppe
 form { display: flex; flex-direction: column; gap: 12px; }
 label { display: flex; flex-direction: column; gap: 4px; color: var(--ink-2); font-size: 14px; }
 
-/* The address bar is a bone. Knobs are two circles on each end. */
+/* The address bar is a bone: a straight shaft with a two-lobed SVG knob on each end. */
 .field { display: flex; flex-direction: column; gap: 6px; position: relative; }
 .bone {
-  --knob: 13px;
-  position: relative; display: flex; align-items: center; gap: 6px; height: 44px;
-  margin: 0 calc(var(--knob) + 2px); padding: 0 4px 0 8px; color: #4a3520;
+  position: relative; display: flex; align-items: center; gap: 6px; height: 32px;
+  margin: 12px 26px; padding: 0 2px 0 4px; color: #4a3520;
   background: linear-gradient(180deg, #faf3e3, var(--bone) 55%, var(--bone-shade));
-  border-radius: 10px; filter: drop-shadow(0 2px 0 #0006);
+  filter: drop-shadow(0 2px 0 #0006);
   transition: filter .2s;
 }
 .bone::before, .bone::after {
-  content: ''; position: absolute; top: calc(50% - var(--knob) * 2.05); width: calc(var(--knob) * 2); height: calc(var(--knob) * 4.1);
-  background:
-    radial-gradient(circle closest-side at 45% 40%, #fbf5e8, var(--bone) 55%, var(--bone-shade) 94%, transparent 97%) top / 100% 50% no-repeat,
-    radial-gradient(circle closest-side at 45% 60%, #f6eedc, var(--bone) 55%, var(--bone-shade) 94%, transparent 97%) bottom / 100% 50% no-repeat;
-  pointer-events: none;
+  content: ''; position: absolute; top: -12px; width: 28px; height: 56px; pointer-events: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 56'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23faf3e3'/%3E%3Cstop offset='.55' stop-color='%23eee3cc'/%3E%3Cstop offset='1' stop-color='%23cdbf9f'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath fill='url(%23g)' d='M32 12 C26 12 24 9 22 6 C19 1 13 0 8 2 C2 4 0 10 1 15 C2 20 6 23 10 25 C12 26 12 30 10 31 C6 33 2 36 1 41 C0 46 2 52 8 54 C13 56 19 55 22 50 C24 47 26 44 32 44 Z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
 }
-.bone::before { left: calc(var(--knob) * -1.25); }
-.bone::after { right: calc(var(--knob) * -1.25); }
+.bone::before { left: -26px; }
+.bone::after { right: -26px; transform: scaleX(-1); }
 .bone:focus-within { filter: drop-shadow(0 2px 0 #0006) drop-shadow(0 0 7px #fb8a2ecc); }
 #address {
   flex: 1; min-width: 0; height: 100%; padding: 0 2px; border: 0; border-radius: 0; background: transparent;
@@ -62,7 +58,7 @@ label { display: flex; flex-direction: column; gap: 4px; color: var(--ink-2); fo
 #address::placeholder { color: #8f7a5c; }
 .bone-icon { width: 18px; height: 18px; flex: none; position: relative; z-index: 1; opacity: .7; }
 #locate {
-  position: relative; z-index: 1; flex: none; width: 34px; height: 34px; padding: 6px; border-radius: 50%;
+  position: relative; z-index: 1; flex: none; width: 30px; height: 30px; padding: 5px; border-radius: 50%;
   background: transparent; color: #7a4a1c; display: grid; place-items: center;
   transition: background .2s, color .2s, transform .2s;
 }
