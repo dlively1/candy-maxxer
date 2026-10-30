@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Candy Maxxer</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎃</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -14,11 +14,17 @@
 </head>
 <body>
   <aside id="panel">
+    <div id="grab">
+      <span class="handle" aria-hidden="true"></span>
+      <div id="peek"></div>
+    </div>
     <h1>🎃 Candy Maxxer</h1>
     <p class="tag">The most candy per minute.</p>
 
     <form id="form">
-      <div class="field">
+      <button type="button" id="planSum" class="plan-sum" aria-expanded="false" aria-controls="formBody"></button>
+      <div id="formBody" class="form-wrap"><div>
+      <div class="field" id="addrField" data-peek>
         <label for="address">Start address</label>
         <div class="bone">
           <svg class="bone-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>
@@ -29,30 +35,34 @@
         </div>
         <ul id="addr-list" class="ac-list" role="listbox" hidden></ul>
       </div>
-      <label>Time out <output id="budgetOut">90 min</output>
+      <label class="slider"><span class="lab">Time out <output id="budgetOut">90 min</output></span>
         <input id="budget" type="range" min="30" max="180" step="15" value="90">
       </label>
-      <div class="row">
-        <label>Walker
-          <select id="pace">
-            <option value="toddler">Toddler</option>
-            <option value="kid" selected>Kid</option>
-            <option value="teen">Teen</option>
-          </select>
-        </label>
-        <label>Per door <output id="porchOut">30 s</output>
-          <input id="porch" type="range" min="10" max="90" step="5" value="30">
-        </label>
-      </div>
-      <label>Compare with
-        <select id="alt">
-          <option value="easy" selected>Easier legs: less climbing</option>
-          <option value="fresh">Different streets</option>
-          <option value="more">30 more minutes</option>
-          <option value="none">Nothing (one route)</option>
-        </select>
+      <label class="slider"><span class="lab">Per door <output id="porchOut">30 s</output></span>
+        <input id="porch" type="range" min="10" max="90" step="5" value="30">
       </label>
+      <!-- The selects hold the real values (URL params read and write them); the buttons below drive them. -->
+      <div class="choice">
+        <span class="lab" id="paceLab">Walker</span>
+        <select id="pace" hidden>
+          <option value="toddler" data-icon="🐣">Toddler</option>
+          <option value="kid" data-icon="🧒" selected>Kid</option>
+          <option value="teen" data-icon="🧑">Teen</option>
+        </select>
+        <div class="seg" data-for="pace" role="radiogroup" aria-labelledby="paceLab"></div>
+      </div>
+      <div class="choice">
+        <span class="lab" id="altLab">Compare with</span>
+        <select id="alt" hidden>
+          <option value="easy" data-icon="🦵" data-sub="less climbing" selected>Easier legs</option>
+          <option value="fresh" data-icon="🔀" data-sub="other streets">Different streets</option>
+          <option value="more" data-icon="⏱️" data-sub="30 more min">More time</option>
+          <option value="none" data-icon="🎯" data-sub="one route">Nothing</option>
+        </select>
+        <div class="seg cards" data-for="alt" role="radiogroup" aria-labelledby="altLab"></div>
+      </div>
       <button id="go" type="submit">Max my candy</button>
+      </div></div>
     </form>
 
     <p id="status" role="status"></p>
@@ -70,7 +80,7 @@
     </section>
 
     <footer>
-      Tap a route in the table to follow it. Click a house to mark it ⭐ full-size or 🌑 dark porch.
+      Tap a route to follow it, or a step to fly to it. Tap a house to mark it ⭐ full-size or 🌑 dark porch.
       Data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>,
       elevation: AWS Terrain Tiles, address search: Photon &amp; US Census.
     </footer>
@@ -83,6 +93,7 @@
         <svg class="sp-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M7.5 7.5 12 3l4.5 4.5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg></span>
     </button>
     <div id="share-hint" role="status" hidden><span class="sh-ghost" aria-hidden="true">👻</span><span class="sh-bubble">Psst… send this to your crew! 👻</span></div>
+    <div id="replan" role="status" aria-live="polite" hidden><span class="rp-pumpkin" aria-hidden="true">🎃</span> Re-planning…</div>
     <div id="loader" hidden></div>
   </main>
 

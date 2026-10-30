@@ -14,10 +14,14 @@ import { createLoader } from './loader.js';
 import { shareLink } from './share.js';
 import { initPill } from './pill.js';
 import { addressBox, locate } from './address.js';
+import { initSheet } from './sheet.js';
 
 const $ = (id) => document.getElementById(id);
 const M_PER_MI = 1609.344, FT_PER_M = 3.28084;
 const ROUTE_COLORS = ['#de7218', '#358de8']; // validated pair: distinct under color-vision deficiency
+const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+const HOME_SVG = `<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14.5" fill="#14111c" stroke="#f5c542" stroke-width="2"/>
+  <path d="M8.5 16.5 16 9.5l7.5 7V24h-15Z" fill="#f5c542"/><rect x="14" y="18.5" width="4" height="5.5" rx="1" fill="#14111c"/></svg>`;
 
 const map = L.map('map', { preferCanvas: true, zoomControl: true }).setView([40.4406, -79.9959], 12); // Pittsburgh until a plan
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -52,14 +56,92 @@ let solveSeq = 0;
 let shown = null;    // last plan: { g, routes, budgetMin }
 let focus = 0;       // which route the directions / arrows follow
 let fitNext = false; // zoom to the routes on the first plan for a new address
+let stopOrder = [];  // per route on screen: Map house index → stop number
+let housePolys = []; // one polygon per house in `area`, restyled (not rebuilt) as plans change
+let housesFor = null;
+let routeLines = []; // drawn route polylines, dimmed while a re-plan is running
 
 for (const [inp, out, fmt] of [['budget', 'budgetOut', (v) => `${v} min`], ['porch', 'porchOut', (v) => `${v} s`]]) {
-  $(inp).addEventListener('input', () => { $(out).value = fmt($(inp).value); });
+  const el = $(inp);
+  const show = () => {
+    $(out).value = fmt(el.value);
+    el.style.setProperty('--fill', `${((el.value - el.min) / (el.max - el.min)) * 100}%`); // candy-corn fill
+  };
+  el.addEventListener('input', show);
+  show();
 }
-for (const id of ['budget', 'pace', 'porch', 'alt']) $(id).addEventListener('change', () => area && run());
+
+// Button groups drive the hidden selects, which stay the source of truth (share links read and write them).
+for (const seg of document.querySelectorAll('.seg')) {
+  const sel = $(seg.dataset.for);
+  seg.innerHTML = [...sel.options].map((o) => `<button type="button" role="radio" data-v="${o.value}">
+    <span class="seg-icon" aria-hidden="true">${o.dataset.icon}</span><span class="seg-text"><b>${o.text}</b>${
+    o.dataset.sub ? `<small>${o.dataset.sub}</small>` : ''}</span></button>`).join('');
+  const btns = [...seg.children];
+  const sync = () => btns.forEach((b) => {
+    const on = b.dataset.v === sel.value;
+    b.setAttribute('aria-checked', on);
+    b.tabIndex = on ? 0 : -1;
+  });
+  const pick = (b) => {
+    if (b.dataset.v === sel.value) return;
+    sel.value = b.dataset.v;
+    sync();
+    sel.dispatchEvent(new Event('change'));
+  };
+  seg.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) pick(b); });
+  seg.addEventListener('keydown', (e) => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const b = btns[(btns.findIndex((x) => x.dataset.v === sel.value) + step + btns.length) % btns.length];
+    pick(b);
+    b.focus();
+  });
+  sel.addEventListener('input', sync); // readUrl
+  sync();
+}
+
+for (const id of ['budget', 'pace', 'porch', 'alt']) $(id).addEventListener('change', () => { planSummary(); if (area) run(); });
+
+// Once there's a plan, the form folds into a one-line summary; tap it to edit.
+const formBody = $('formBody');
+function editing(on) {
+  document.body.classList.toggle('editing', on);
+  $('planSum').setAttribute('aria-expanded', on);
+  const open = on || !document.body.classList.contains('has-plan');
+  formBody.inert = !open;
+  if (!open) formBody.classList.remove('settled');
+  else if (reduced.matches) formBody.classList.add('settled');
+}
+// Let the autocomplete list spill out only once the drawer has finished opening.
+formBody.addEventListener('transitionend', (e) => {
+  if (e.target === formBody && !formBody.inert) formBody.classList.add('settled');
+});
+formBody.classList.add('settled');
+$('planSum').addEventListener('click', () => editing(!document.body.classList.contains('editing')));
+
+function planSummary() {
+  const short = $('address').value.split(',')[0].trim() || 'Somewhere';
+  $('planSum').innerHTML = `<span class="ps-where">📍 ${esc(short)}</span>
+    <span class="ps-what">${$('budget').value} min · ${$('pace').selectedOptions[0].text} · ${$('porch').value} s/door</span>
+    <span class="ps-edit" aria-hidden="true">✏️</span>`;
+}
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 $('form').addEventListener('submit', (e) => { e.preventDefault(); run(); });
 $('share').addEventListener('click', share);
 const pill = initPill(map, $('share'));
+const sheet = initSheet($('panel'), $('grab'));
+// The panel floats over the map's left edge on desktop and its bottom on phones: keep controls clear of it.
+const placeControls = () => {
+  map.zoomControl.setPosition(sheet.mobile ? 'topleft' : 'topright');
+  map.attributionControl.setPosition(sheet.mobile ? 'topright' : 'bottomright');
+};
+matchMedia('(max-width: 760px)').addEventListener('change', placeControls);
+placeControls();
+// Padding that keeps fitted bounds out from under the panel.
+const fitPad = (px) => ({ paddingTopLeft: [px + sheet.coverLeft(), px], paddingBottomRight: [px, px + sheet.visible()] });
+$('address').addEventListener('focus', () => sheet.to('full'));
 
 // A spot we already have coordinates for (a picked suggestion or "my location"): skip geocoding.
 let pinned = null; // { address, lat, lon }
@@ -124,6 +206,8 @@ function share() {
 function status(msg, isError = false) {
   $('status').textContent = msg;
   $('status').classList.toggle('error', isError);
+  $('status').toggleAttribute('data-peek', isError); // keep errors in view on a collapsed sheet
+  if (isError) sheet.refresh();
   if (!isError) loader.stage(msg);
 }
 
@@ -192,12 +276,17 @@ async function run() {
   // solver, and the celebration can be quick.
   const loaded = area?.address === address && area.houses.length >= housesWanted(budgetMin);
   const ready = loaded || (areaJob?.address === address && areaJob.done);
-  loader.show();
+  // A settings tweak on a loaded place re-plans with the map in view; anything else gets the full show.
+  const quiet = loaded && !!shown;
   progressBase = ready ? 0 : 0.42;
+  if (!quiet) {
+    loader.show();
+    document.activeElement?.blur(); // drop the phone keyboard
+  }
   try {
     const next = loaded ? area : await areaFor(address, budgetMin);
     if (next !== area) { area = next; fitNext = true; }
-    await solveAndDraw(budgetMin, { quick: ready || !area.downloaded });
+    await solveAndDraw(budgetMin, { quiet, quick: ready || !area.downloaded });
   } catch (e) {
     console.error(e);
     status(e.message, true);
@@ -207,7 +296,17 @@ async function run() {
   }
 }
 
-async function solveAndDraw(budgetMin, { quick = true } = {}) {
+// Dim the routes and show a small chip while a quick re-plan runs (only if it isn't instant).
+let replanTimer = 0;
+function replanning(on) {
+  clearTimeout(replanTimer);
+  document.body.classList.toggle('replanning', on);
+  for (const l of routeLines) l.setStyle({ opacity: on ? l.baseOpacity * 0.35 : l.baseOpacity });
+  if (on) replanTimer = setTimeout(() => { $('replan').hidden = false; }, 150);
+  else $('replan').hidden = true;
+}
+
+async function solveAndDraw(budgetMin, { quiet = !!shown, quick = true } = {}) {
   const pace = PACES[$('pace').value];
   const porchSec = +$('porch').value;
   const { net, houses, z, houseZ, startNode } = area;
@@ -215,24 +314,34 @@ async function solveAndDraw(budgetMin, { quick = true } = {}) {
   const hs = attachHouses(net, houses, houseZ, z, { pace, porchSec });
   for (const h of hs) h.value = candyValue(h, overrides[h.id]);
 
-  loader.show();
+  if (quiet) replanning(true);
+  else loader.show();
   status($('alt').value === 'none' ? 'Planning the sweetest route…' : 'Planning two routes to compare…');
   const seq = ++solveSeq;
-  const res = await new Promise((resolve) => {
-    pending.set(seq, resolve);
-    worker.postMessage({
-      seq, g, startNode, budgetSec: budgetMin * 60, alt: $('alt').value,
-      houses: hs.map(({ index, node, doorSec, value }) => ({ index, node, doorSec, value })),
+  let res;
+  try {
+    res = await new Promise((resolve) => {
+      pending.set(seq, resolve);
+      worker.postMessage({
+        seq, g, startNode, budgetSec: budgetMin * 60, alt: $('alt').value,
+        houses: hs.map(({ index, node, doorSec, value }) => ({ index, node, doorSec, value })),
+      });
     });
-  });
+  } finally {
+    if (seq === solveSeq) replanning(false);
+  }
   if (seq !== solveSeq) return;
   if (!res.ok) throw new Error(res.error);
   shown = { g, routes: res.routes, budgetMin };
   focus = Math.min(focus, res.routes.length - 1);
   progressBase = 0;
-  await loader.finish(res.routes[0].candy, { quick });
-  if (seq !== solveSeq) return;
-  draw({ reveal: true });
+  if (!quiet) {
+    await loader.finish(res.routes[0].candy, { quick });
+    if (seq !== solveSeq) return;
+    sheet.to('peek');
+    editing(false);
+  }
+  draw({ reveal: !quiet, tween: quiet });
   status(`Weighed up ${res.routes[0].considered} nearby houses in ${(res.ms / 1000).toFixed(1)} s.`);
   history.replaceState(null, '', linkUrl());
 }
@@ -252,36 +361,70 @@ function geometry(g, route) {
   return { pts, prof };
 }
 
-function draw({ reveal = false } = {}) {
-  const { g, routes, budgetMin } = shown;
-  const { houses, start } = area;
-  const geo = routes.map((r) => geometry(g, r));
-  const order = routes.map((r) => new Map(r.stops.map((idx, i) => [idx, i + 1])));
-  const color = (i) => ROUTE_COLORS[i];
-
-  // Houses: the followed route's stops fill in its color; the other route's stops get a faint tint.
+// Houses: built once per neighborhood, then restyled for each plan.
+function buildHouses() {
   layers.houses.clearLayers();
-  houses.forEach((h, i) => {
-    const ov = overrides[h.id] || 'normal';
-    const mine = order[focus].get(i);
-    const other = routes.length > 1 ? order[1 - focus].get(i) : undefined;
-    let fill = '#5b536c', opacity = 0.35;
-    if (ov === 'dark') { fill = '#3a3448'; opacity = 0.9; }
-    else if (ov === 'star') { fill = '#f5c542'; opacity = 0.9; }
-    else if (mine) { fill = color(focus); opacity = 0.9; }
-    else if (other) { fill = color(1 - focus); opacity = 0.45; }
-    const poly = L.polygon(h.outline, { color: fill, weight: 1, fillColor: fill, fillOpacity: opacity });
-    const tag = ov === 'star' ? ' ⭐' : ov === 'dark' ? ' 🌑' : '';
-    const stops = routes.map((r, ri) => order[ri].get(i) && `Stop ${order[ri].get(i)} on ${r.label}`).filter(Boolean);
-    poly.bindTooltip(`<b>${h.address || 'House'}${tag}</b>${stops.map((t) => `<br>${t}`).join('')}`, { sticky: true });
-    poly.on('click', () => {
-      const next = OVERRIDES[(OVERRIDES.indexOf(ov) + 1) % OVERRIDES.length];
-      if (next === 'normal') delete overrides[h.id]; else overrides[h.id] = next;
-      localStorage.setItem('cm:overrides', JSON.stringify(overrides));
-      solveAndDraw(budgetMin).catch((e) => { status(e.message, true); loader.hide(); });
-    });
-    poly.addTo(layers.houses);
-  });
+  housePolys = area.houses.map((h, i) => L.polygon(h.outline, { weight: 1 })
+    .bindTooltip(() => houseTip(h, i), { sticky: true })
+    .on('click', () => toggleHouse(h, i))
+    .addTo(layers.houses));
+  housesFor = area;
+}
+
+function houseTip(h, i) {
+  const ov = overrides[h.id];
+  const tag = ov === 'star' ? ' ⭐' : ov === 'dark' ? ' 🌑' : '';
+  const stops = shown.routes.map((r, ri) => stopOrder[ri]?.get(i) && `Stop ${stopOrder[ri].get(i)} on ${r.label}`).filter(Boolean);
+  return `<b>${h.address || 'House'}${tag}</b>${stops.map((t) => `<br>${t}`).join('')}`;
+}
+
+// The followed route's stops fill in its color; the other route's stops get a faint tint.
+function styleHouse(h, i) {
+  const ov = overrides[h.id] || 'normal';
+  const mine = stopOrder[focus]?.get(i);
+  const other = shown.routes.length > 1 ? stopOrder[1 - focus]?.get(i) : undefined;
+  let fill = '#5b536c', opacity = 0.35;
+  if (ov === 'dark') { fill = '#3a3448'; opacity = 0.9; }
+  else if (ov === 'star') { fill = '#f5c542'; opacity = 0.9; }
+  else if (mine) { fill = ROUTE_COLORS[focus]; opacity = 0.9; }
+  else if (other) { fill = ROUTE_COLORS[1 - focus]; opacity = 0.45; }
+  housePolys[i].setStyle({ color: fill, fillColor: fill, fillOpacity: opacity });
+}
+
+// Cycle normal → ⭐ → 🌑: show it on the house right away, then re-plan around it.
+function toggleHouse(h, i) {
+  const ov = overrides[h.id] || 'normal';
+  const next = OVERRIDES[(OVERRIDES.indexOf(ov) + 1) % OVERRIDES.length];
+  if (next === 'normal') delete overrides[h.id]; else overrides[h.id] = next;
+  localStorage.setItem('cm:overrides', JSON.stringify(overrides));
+  styleHouse(h, i);
+  const mark = L.marker([h.lat, h.lon], {
+    icon: L.divIcon({ className: 'mark-icon', html: `<span class="mark-pop">${{ star: '⭐', dark: '🌑', normal: '🍬' }[next]}</span>`, iconSize: [30, 30] }),
+    interactive: false, keyboard: false,
+  }).addTo(map);
+  setTimeout(() => mark.remove(), 1000);
+  solveAndDraw(+$('budget').value).catch((e) => { status(e.message, true); loader.hide(); });
+}
+
+function draw({ reveal = false, tween = false } = {}) {
+  const { g, routes, budgetMin } = shown;
+  const { start } = area;
+  const geo = routes.map((r) => geometry(g, r));
+  const color = (i) => ROUTE_COLORS[i];
+  stopOrder = routes.map((r) => new Map(r.stops.map((idx, i) => [idx, i + 1])));
+
+  // Summary first, so the sheet is measured with it before the map fits the routes above it.
+  document.body.classList.add('has-plan');
+  editing(document.body.classList.contains('editing'));
+  planSummary();
+  $('addrField').removeAttribute('data-peek');
+  renderPeek(routes, tween);
+  renderCompare(routes, budgetMin, tween);
+  $('results').hidden = false;
+  sheet.refresh();
+
+  if (housesFor !== area) buildHouses();
+  area.houses.forEach(styleHouse);
 
   // Routes: the other one dimmed and dashed underneath; the followed one on top with arrows.
   layers.route.clearLayers();
@@ -290,23 +433,42 @@ function draw({ reveal = false } = {}) {
   const lines = [];
   for (const i of drawOrder) {
     const on = i === focus;
-    if (on) lines.push(L.polyline(geo[i].pts, { color: '#000', weight: 8, opacity: 0.45, interactive: false }).addTo(layers.route));
+    if (on) {
+      lines.push(L.polyline(geo[i].pts, { color: color(i), weight: 16, opacity: 0.16, interactive: false }).addTo(layers.route)); // glow
+      lines.push(L.polyline(geo[i].pts, { color: '#000', weight: 8, opacity: 0.45, interactive: false }).addTo(layers.route));
+    }
     lines.push(L.polyline(geo[i].pts, {
       color: color(i), weight: on ? 4 : 3, opacity: on ? 1 : 0.6, dashArray: on ? null : '6 6',
     }).on('click', () => setFocus(i)).addTo(layers.route));
   }
+  for (const l of lines) l.baseOpacity = l.options.opacity;
+  routeLines = lines;
   if (fitNext) {
     fitNext = false;
-    map.fitBounds(L.latLngBounds(geo.flatMap((x) => x.pts)), { padding: [30, 30], maxZoom: 17, animate: false });
+    map.fitBounds(L.latLngBounds(geo.flatMap((x) => x.pts)), { ...fitPad(30), maxZoom: 17, animate: false });
   }
   const arrows = () => arrowLayer(map, geo[focus].pts, color(focus), { pop: true }).addTo(layers.arrows);
-  if (reveal && !matchMedia('(prefers-reduced-motion: reduce)').matches) drawIn(lines, () => { arrows(); pill.nudge(); });
+  if (reveal && !reduced.matches) {
+    // Porch lights: each stop on the followed route waits dark until the line reaches it.
+    const r = routes[focus], lit = [];
+    let cum = 0;
+    r.legs.forEach((leg, k) => { cum += leg.length; if (k < r.stops.length) lit.push([r.stops[k], cum]); });
+    for (const [idx] of lit) housePolys[idx].setStyle({ color: '#5b536c', fillColor: '#5b536c', fillOpacity: 0.35 });
+    let next = 0;
+    const reached = (n) => {
+      for (; next < lit.length && lit[next][1] < n; next++) {
+        const idx = lit[next][0];
+        housePolys[idx].setStyle({ color: '#ffd36b', fillColor: '#ffd36b', fillOpacity: 1 });
+        setTimeout(() => styleHouse(area.houses[idx], idx), 350);
+      }
+    };
+    drawIn(lines, geo[focus].pts.length, reached, () => { arrows(); pill.nudge(); });
+  }
   else { arrows(); if (reveal) pill.nudge(); }
   L.marker([start.lat, start.lon], {
-    icon: L.divIcon({ className: 'home-icon', html: '🏠', iconSize: [28, 28], iconAnchor: [14, 14] }),
+    icon: L.divIcon({ className: 'home-icon', html: HOME_SVG, iconSize: [32, 32], iconAnchor: [16, 16] }),
   }).bindTooltip(`Start & finish: ${start.label}`).addTo(layers.route);
 
-  renderCompare(routes, budgetMin);
   renderProfile($('profile'), routes.map((r, i) => ({ label: r.label, color: color(i), focused: i === focus, pts: geo[i].prof })), {
     onHover: (hits) => {
       layers.cursor.clearLayers();
@@ -314,11 +476,11 @@ function draw({ reveal = false } = {}) {
     },
   });
   renderDirections(g, routes[focus], geo[focus]);
-  $('results').hidden = false;
 }
 
 // Walk the route onto the map: every line grows from home along its path, then the arrows pop in.
-function drawIn(lines, then) {
+// onReach(n) hears how many points of the followed route (`focusLen` long) are drawn so far.
+function drawIn(lines, focusLen, onReach, then) {
   const full = lines.map((l) => l.getLatLngs().slice());
   const longest = Math.max(...full.map((f) => f.length));
   const ms = Math.min(1800, Math.max(700, longest * 3));
@@ -327,6 +489,7 @@ function drawIn(lines, then) {
     const t = Math.min(1, (now - t0) / ms);
     const e = 1 - (1 - t) ** 3; // ease-out
     lines.forEach((l, i) => l.setLatLngs(full[i].slice(0, Math.max(2, Math.ceil(full[i].length * e)))));
+    onReach(Math.ceil(focusLen * e));
     if (t < 1) requestAnimationFrame(step);
     else then();
   };
@@ -340,29 +503,70 @@ function setFocus(i) {
   draw();
 }
 
-function renderCompare(routes, budgetMin) {
+// Numbers that changed in a re-plan count to their new value and flash, so you can see what moved.
+const lastVals = new Map();
+const num = (key, v, dec = 0) => `<span class="num" data-k="${key}" data-v="${v}" data-dec="${dec}">${v.toFixed(dec)}</span>`;
+
+function countUp(root, tween) {
+  for (const el of root.querySelectorAll('.num')) {
+    const { k, dec } = el.dataset, to = +el.dataset.v, from = lastVals.get(k);
+    lastVals.set(k, to);
+    if (!tween || from === undefined || from.toFixed(dec) === to.toFixed(dec)) continue;
+    el.classList.add('bump');
+    setTimeout(() => el.classList.remove('bump'), 700);
+    if (reduced.matches) continue;
+    const t0 = performance.now();
+    const step = (now) => {
+      const t = Math.min(1, (now - t0) / 600), e = 1 - (1 - t) ** 3;
+      el.textContent = (from + (to - from) * e).toFixed(dec);
+      if (t < 1 && el.isConnected) requestAnimationFrame(step);
+    };
+    el.textContent = from.toFixed(dec);
+    requestAnimationFrame(step);
+  }
+}
+
+// The collapsed sheet on phones: the haul, the gist, and which route to follow.
+function renderPeek(routes, tween) {
+  const r = routes[focus];
+  $('peek').innerHTML = `<div class="pk-haul"><span class="pk-candy">≈ ${num(`peek:${r.key}`, Math.round(r.candy))}</span>
+      <span class="pk-unit">pieces</span></div>
+    <div class="pk-stats">${r.stops.length} houses · ${(r.distM / M_PER_MI).toFixed(2)} mi · ${Math.round(r.totalSec / 60)} min · ${Math.round(r.climbM * FT_PER_M)} ft climb</div>
+    ${routes.length > 1 ? `<div class="pk-routes">${routes.map((x, i) => `<button type="button" class="route-chip${i === focus ? ' active' : ''}" data-i="${i}" aria-pressed="${i === focus}">
+      <i style="background:${ROUTE_COLORS[i]}"></i>${x.label}</button>`).join('')}</div>` : ''}`;
+  $('peek').querySelectorAll('.route-chip').forEach((b) => b.addEventListener('click', () => setFocus(+b.dataset.i)));
+  countUp($('peek'), tween);
+}
+
+// Route cards: the haul up top, the gist below; the second card shows how it differs from the first.
+function renderCompare(routes, budgetMin, tween) {
   const two = routes.length > 1;
-  const rows = [
-    ['Candy', (r) => `≈ ${Math.round(r.candy)}`, (r) => r.candy, true],
-    ['Houses', (r) => r.stops.length, (r) => r.stops.length],
-    ['Walking', (r) => `${(r.distM / M_PER_MI).toFixed(2)} mi`, (r) => r.distM],
-    ['Climb', (r) => `${Math.round(r.climbM * FT_PER_M)} ft`, (r) => r.climbM],
-    ['Time', (r) => `${Math.round(r.totalSec / 60)} min`, (r) => r.totalSec],
-    ['Pieces / min', (r) => (r.candy / (r.totalSec / 60) || 0).toFixed(1), (r) => r.candy / r.totalSec],
+  // [label, value, decimals, suffix]
+  const stats = [
+    ['Houses', (r) => r.stops.length, 0, ''],
+    ['Walking', (r) => r.distM / M_PER_MI, 2, ' mi'],
+    ['Climb', (r) => Math.round(r.climbM * FT_PER_M), 0, ' ft'],
+    ['Time', (r) => Math.round(r.totalSec / 60), 0, ' min'],
   ];
   const delta = (a, b) => {
     if (!a) return '';
     const pct = Math.round(((b - a) / a) * 100);
-    return pct ? `${pct > 0 ? '+' : '−'}${Math.abs(pct)}%` : 'same';
+    return `<small class="delta">${pct ? `${pct > 0 ? '+' : '−'}${Math.abs(pct)}%` : 'same'}</small>`;
   };
-  const head = routes.map((r, i) => `<th><button class="route-tab${i === focus ? ' active' : ''}" data-i="${i}" aria-pressed="${i === focus}">
-      <i style="background:${ROUTE_COLORS[i]}"></i>${r.label}</button></th>`).join('');
-  const body = rows.map(([label, fmt, val, hero]) => `<tr${hero ? ' class="hero"' : ''}><th>${label}</th>${routes.map((r, i) =>
-    `<td>${fmt(r)}${two && i === 1 ? `<small>${delta(val(routes[0]), val(r))}</small>` : ''}</td>`).join('')}</tr>`).join('');
+  const vs = (i, a, b) => (two && i === 1 ? delta(a, b) : '');
+  const cards = routes.map((r, i) => `<button type="button" class="rcard${i === focus ? ' active' : ''}" data-i="${i}"
+      aria-pressed="${i === focus}" style="--c:${ROUTE_COLORS[i]}">
+    <span class="rc-label"><i></i>${r.label}</span>
+    <span class="rc-haul"><span class="rc-candy">${num(`Candy:${r.key}`, Math.round(r.candy))}</span>
+      <span class="rc-unit">pieces ${vs(i, routes[0].candy, r.candy)}</span></span>
+    <span class="rc-rate">${num(`Rate:${r.key}`, r.candy / (r.totalSec / 60) || 0, 1)} / min</span>
+    <span class="rc-stats">${stats.map(([label, val, dec, post]) => `<span><span class="k">${label}</span>
+      <span class="v">${num(`${label}:${r.key}`, val(r), dec)}${post}${vs(i, val(routes[0]), val(r))}</span></span>`).join('')}</span>
+  </button>`).join('');
   const note = routes[0].note || (routes[1]?.key === 'more' ? `${routes[1].label} walks for up to ${budgetMin + 30} min.` : '');
-  $('compare').innerHTML = `<table class="compare"><thead><tr><th></th>${head}</tr></thead><tbody>${body}</tbody></table>
-    ${note ? `<p class="note">${note}</p>` : ''}`;
-  $('compare').querySelectorAll('.route-tab').forEach((b) => b.addEventListener('click', () => setFocus(+b.dataset.i)));
+  $('compare').innerHTML = `<div class="rcards${two ? ' two' : ''}">${cards}</div>${note ? `<p class="note">${note}</p>` : ''}`;
+  $('compare').querySelectorAll('.rcard').forEach((b) => b.addEventListener('click', () => setFocus(+b.dataset.i)));
+  countUp($('compare'), tween);
 }
 
 function renderDirections(g, route, geo) {
@@ -372,18 +576,31 @@ function renderDirections(g, route, geo) {
   const list = $('directions');
   list.innerHTML = steps.map((s) => `<li>${stepText(s)} <small>${Math.round(s.m * FT_PER_M).toLocaleString()} ft${
     s.houses ? ` · ${s.houses} house${s.houses > 1 ? 's' : ''}` : ''}</small></li>`).join('') + '<li>Arrive home 🏠</li>';
-  // Hover a step to light it up on the map. Steps split the walked edges in order,
-  // so step i spans points [edges before it, edges before it + its own].
-  let first = 0;
+  // Hover a step to light it up on the map; tap one to fly there and keep it lit. Steps split the
+  // walked edges in order, so step i spans points [edges before it, edges before it + its own].
+  layers.highlight.clearLayers();
+  const light = (span) => {
+    layers.highlight.clearLayers();
+    if (span && span[1] > span[0]) L.polyline(geo.pts.slice(span[0], span[1] + 1), { color: '#fff', weight: 7, opacity: 0.9, interactive: false }).addTo(layers.highlight);
+  };
+  let first = 0, picked = null;
   [...list.children].forEach((li, i) => {
     const s = steps[i];
-    const from = first, to = first + (s?.edges.length ?? 0);
-    first = to;
-    li.addEventListener('mouseenter', () => {
-      layers.highlight.clearLayers();
-      if (to > from) L.polyline(geo.pts.slice(from, to + 1), { color: '#fff', weight: 7, opacity: 0.9, interactive: false }).addTo(layers.highlight);
+    const span = [first, first + (s?.edges.length ?? 0)];
+    first = span[1];
+    li.addEventListener('mouseenter', () => light(span));
+    li.addEventListener('mouseleave', () => light(picked));
+    li.addEventListener('click', () => {
+      list.querySelector('.on')?.classList.remove('on');
+      li.classList.add('on');
+      picked = span;
+      light(span);
+      if (span[1] === span[0]) return;
+      if (sheet.snap === 'full') sheet.to('half'); // leave some map to fly to
+      map.flyToBounds(L.latLngBounds(geo.pts.slice(span[0], span[1] + 1)), {
+        ...fitPad(40), maxZoom: 18, duration: 0.6,
+      });
     });
-    li.addEventListener('mouseleave', () => layers.highlight.clearLayers());
   });
 }
 
