@@ -1,0 +1,14 @@
+# dependencies (none needed, but keep stray installs out)
+node_modules/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# logs & scratch
+*.log
+npm-debug.log*
+tmp/

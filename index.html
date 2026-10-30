@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Candy Maxxer</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎃</text></svg>">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside id="panel">
+    <h1>🎃 Candy Maxxer</h1>
+    <p class="tag">The most candy per minute, hills included.</p>
+
+    <form id="form">
+      <label>Start address
+        <input id="address" value="301 Shiloh St, Pittsburgh, PA" placeholder="Street address, city, state" autocomplete="street-address" required>
+      </label>
+      <label>Time out <output id="budgetOut">90 min</output>
+        <input id="budget" type="range" min="30" max="180" step="15" value="90">
+      </label>
+      <div class="row">
+        <label>Walker
+          <select id="pace">
+            <option value="toddler">Toddler</option>
+            <option value="kid" selected>Kid</option>
+            <option value="teen">Teen</option>
+          </select>
+        </label>
+        <label>Per door <output id="porchOut">30 s</output>
+          <input id="porch" type="range" min="10" max="90" step="5" value="30">
+        </label>
+      </div>
+      <label>Compare with
+        <select id="alt">
+          <option value="easy" selected>Easier legs: less climbing</option>
+          <option value="fresh">Different streets</option>
+          <option value="more">30 more minutes</option>
+          <option value="none">Nothing (one route)</option>
+        </select>
+      </label>
+      <button id="go" type="submit">Max my candy</button>
+    </form>
+
+    <p id="status" role="status"></p>
+
+    <section id="results" hidden>
+      <div id="compare"></div>
+      <figure class="profile">
+        <figcaption>Elevation along route</figcaption>
+        <div id="profile"></div>
+      </figure>
+      <button id="share" type="button" class="secondary">Share this route</button>
+      <h2 id="dirTitle">Directions</h2>
+      <ol id="directions"></ol>
+    </section>
+
+    <footer>
+      Tap a route in the table to follow it. Click a house to mark it ⭐ full-size or 🌑 dark porch.
+      Data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>,
+      elevation: AWS Terrain Tiles, geocoding: US Census.
+    </footer>
+  </aside>
+  <main id="map"></main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
