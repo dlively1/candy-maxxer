@@ -70,7 +70,7 @@ for (const [inp, out, fmt] of [['budget', 'budgetOut', (v) => `${v} min`], ['por
   const el = $(inp);
   const show = () => {
     $(out).value = fmt(el.value);
-    el.style.setProperty('--fill', `${((el.value - el.min) / (el.max - el.min)) * 100}%`); // candy-corn fill
+    el.style.setProperty('--fill', (el.value - el.min) / (el.max - el.min)); // candy-corn fill
   };
   el.addEventListener('input', show);
   show();
