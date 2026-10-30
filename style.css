@@ -50,7 +50,7 @@ label { display: flex; flex-direction: column; gap: 4px; color: var(--ink-2); fo
 }
 .bone::before { left: -26px; }
 .bone::after { right: -26px; transform: scaleX(-1); }
-.bone:focus-within { filter: drop-shadow(0 2px 0 #0006) drop-shadow(0 0 7px #fb8a2ecc); }
+.bone:focus-within { filter: drop-shadow(0 2px 0 #0006) drop-shadow(0 0 3px #fb8a2e) drop-shadow(0 0 10px #fb8a2eaa); }
 #address {
   flex: 1; min-width: 0; height: 100%; padding: 0 2px; border: 0; border-radius: 0; background: transparent;
   font-size: 16px; color: #3b2814; outline: none; position: relative; z-index: 1;
