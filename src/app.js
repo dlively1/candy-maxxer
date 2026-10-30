@@ -20,6 +20,8 @@ const $ = (id) => document.getElementById(id);
 const M_PER_MI = 1609.344, FT_PER_M = 3.28084;
 const ROUTE_COLORS = ['#de7218', '#358de8']; // validated pair: distinct under color-vision deficiency
 const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+const HOME_SVG = `<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14.5" fill="#14111c" stroke="#f5c542" stroke-width="2"/>
+  <path d="M8.5 16.5 16 9.5l7.5 7V24h-15Z" fill="#f5c542"/><rect x="14" y="18.5" width="4" height="5.5" rx="1" fill="#14111c"/></svg>`;
 
 const map = L.map('map', { preferCanvas: true, zoomControl: true }).setView([40.4406, -79.9959], 12); // Pittsburgh until a plan
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -60,14 +62,85 @@ let housesFor = null;
 let routeLines = []; // drawn route polylines, dimmed while a re-plan is running
 
 for (const [inp, out, fmt] of [['budget', 'budgetOut', (v) => `${v} min`], ['porch', 'porchOut', (v) => `${v} s`]]) {
-  $(inp).addEventListener('input', () => { $(out).value = fmt($(inp).value); });
+  const el = $(inp);
+  const show = () => {
+    $(out).value = fmt(el.value);
+    el.style.setProperty('--fill', `${((el.value - el.min) / (el.max - el.min)) * 100}%`); // candy-corn fill
+  };
+  el.addEventListener('input', show);
+  show();
 }
-for (const id of ['budget', 'pace', 'porch', 'alt']) $(id).addEventListener('change', () => area && run());
+
+// Button groups drive the hidden selects, which stay the source of truth (share links read and write them).
+for (const seg of document.querySelectorAll('.seg')) {
+  const sel = $(seg.dataset.for);
+  seg.innerHTML = [...sel.options].map((o) => `<button type="button" role="radio" data-v="${o.value}">
+    <span class="seg-icon" aria-hidden="true">${o.dataset.icon}</span><span class="seg-text"><b>${o.text}</b>${
+    o.dataset.sub ? `<small>${o.dataset.sub}</small>` : ''}</span></button>`).join('');
+  const btns = [...seg.children];
+  const sync = () => btns.forEach((b) => {
+    const on = b.dataset.v === sel.value;
+    b.setAttribute('aria-checked', on);
+    b.tabIndex = on ? 0 : -1;
+  });
+  const pick = (b) => {
+    if (b.dataset.v === sel.value) return;
+    sel.value = b.dataset.v;
+    sync();
+    sel.dispatchEvent(new Event('change'));
+  };
+  seg.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) pick(b); });
+  seg.addEventListener('keydown', (e) => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const b = btns[(btns.findIndex((x) => x.dataset.v === sel.value) + step + btns.length) % btns.length];
+    pick(b);
+    b.focus();
+  });
+  sel.addEventListener('input', sync); // readUrl
+  sync();
+}
+
+for (const id of ['budget', 'pace', 'porch', 'alt']) $(id).addEventListener('change', () => { planSummary(); if (area) run(); });
+
+// Once there's a plan, the form folds into a one-line summary; tap it to edit.
+const formBody = $('formBody');
+function editing(on) {
+  document.body.classList.toggle('editing', on);
+  $('planSum').setAttribute('aria-expanded', on);
+  const open = on || !document.body.classList.contains('has-plan');
+  formBody.inert = !open;
+  if (!open) formBody.classList.remove('settled');
+  else if (reduced.matches) formBody.classList.add('settled');
+}
+// Let the autocomplete list spill out only once the drawer has finished opening.
+formBody.addEventListener('transitionend', (e) => {
+  if (e.target === formBody && !formBody.inert) formBody.classList.add('settled');
+});
+formBody.classList.add('settled');
+$('planSum').addEventListener('click', () => editing(!document.body.classList.contains('editing')));
+
+function planSummary() {
+  const short = $('address').value.split(',')[0].trim() || 'Somewhere';
+  $('planSum').innerHTML = `<span class="ps-where">📍 ${esc(short)}</span>
+    <span class="ps-what">${$('budget').value} min · ${$('pace').selectedOptions[0].text} · ${$('porch').value} s/door</span>
+    <span class="ps-edit" aria-hidden="true">✏️</span>`;
+}
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 $('form').addEventListener('submit', (e) => { e.preventDefault(); run(); });
 $('share').addEventListener('click', share);
 const pill = initPill(map, $('share'));
 const sheet = initSheet($('panel'), $('grab'));
-if (sheet.mobile) map.attributionControl.setPosition('topright'); // the sheet covers the bottom of the map
+// The panel floats over the map's left edge on desktop and its bottom on phones: keep controls clear of it.
+const placeControls = () => {
+  map.zoomControl.setPosition(sheet.mobile ? 'topleft' : 'topright');
+  map.attributionControl.setPosition(sheet.mobile ? 'topright' : 'bottomright');
+};
+matchMedia('(max-width: 760px)').addEventListener('change', placeControls);
+placeControls();
+// Padding that keeps fitted bounds out from under the panel.
+const fitPad = (px) => ({ paddingTopLeft: [px + sheet.coverLeft(), px], paddingBottomRight: [px, px + sheet.visible()] });
 $('address').addEventListener('focus', () => sheet.to('full'));
 
 // A spot we already have coordinates for (a picked suggestion or "my location"): skip geocoding.
@@ -229,6 +302,7 @@ async function solveAndDraw(budgetMin, { quiet = !!shown } = {}) {
     await loader.finish(res.routes[0].candy);
     if (seq !== solveSeq) return;
     sheet.to('peek');
+    editing(false);
   }
   draw({ reveal: !quiet, tween: quiet });
   status(`Weighed up ${res.routes[0].considered} nearby houses in ${(res.ms / 1000).toFixed(1)} s.`);
@@ -304,6 +378,8 @@ function draw({ reveal = false, tween = false } = {}) {
 
   // Summary first, so the sheet is measured with it before the map fits the routes above it.
   document.body.classList.add('has-plan');
+  editing(document.body.classList.contains('editing'));
+  planSummary();
   $('addrField').removeAttribute('data-peek');
   renderPeek(routes, tween);
   renderCompare(routes, budgetMin, tween);
@@ -332,15 +408,28 @@ function draw({ reveal = false, tween = false } = {}) {
   routeLines = lines;
   if (fitNext) {
     fitNext = false;
-    map.fitBounds(L.latLngBounds(geo.flatMap((x) => x.pts)), {
-      paddingTopLeft: [30, 30], paddingBottomRight: [30, 30 + sheet.visible()], maxZoom: 17, animate: false,
-    });
+    map.fitBounds(L.latLngBounds(geo.flatMap((x) => x.pts)), { ...fitPad(30), maxZoom: 17, animate: false });
   }
   const arrows = () => arrowLayer(map, geo[focus].pts, color(focus), { pop: true }).addTo(layers.arrows);
-  if (reveal && !reduced.matches) drawIn(lines, () => { arrows(); pill.nudge(); });
+  if (reveal && !reduced.matches) {
+    // Porch lights: each stop on the followed route waits dark until the line reaches it.
+    const r = routes[focus], lit = [];
+    let cum = 0;
+    r.legs.forEach((leg, k) => { cum += leg.length; if (k < r.stops.length) lit.push([r.stops[k], cum]); });
+    for (const [idx] of lit) housePolys[idx].setStyle({ color: '#5b536c', fillColor: '#5b536c', fillOpacity: 0.35 });
+    let next = 0;
+    const reached = (n) => {
+      for (; next < lit.length && lit[next][1] < n; next++) {
+        const idx = lit[next][0];
+        housePolys[idx].setStyle({ color: '#ffd36b', fillColor: '#ffd36b', fillOpacity: 1 });
+        setTimeout(() => styleHouse(area.houses[idx], idx), 350);
+      }
+    };
+    drawIn(lines, geo[focus].pts.length, reached, () => { arrows(); pill.nudge(); });
+  }
   else { arrows(); if (reveal) pill.nudge(); }
   L.marker([start.lat, start.lon], {
-    icon: L.divIcon({ className: 'home-icon', html: '🏠', iconSize: [28, 28], iconAnchor: [14, 14] }),
+    icon: L.divIcon({ className: 'home-icon', html: HOME_SVG, iconSize: [32, 32], iconAnchor: [16, 16] }),
   }).bindTooltip(`Start & finish: ${start.label}`).addTo(layers.route);
 
   renderProfile($('profile'), routes.map((r, i) => ({ label: r.label, color: color(i), focused: i === focus, pts: geo[i].prof })), {
@@ -353,7 +442,8 @@ function draw({ reveal = false, tween = false } = {}) {
 }
 
 // Walk the route onto the map: every line grows from home along its path, then the arrows pop in.
-function drawIn(lines, then) {
+// onReach(n) hears how many points of the followed route (`focusLen` long) are drawn so far.
+function drawIn(lines, focusLen, onReach, then) {
   const full = lines.map((l) => l.getLatLngs().slice());
   const longest = Math.max(...full.map((f) => f.length));
   const ms = Math.min(1800, Math.max(700, longest * 3));
@@ -362,6 +452,7 @@ function drawIn(lines, then) {
     const t = Math.min(1, (now - t0) / ms);
     const e = 1 - (1 - t) ** 3; // ease-out
     lines.forEach((l, i) => l.setLatLngs(full[i].slice(0, Math.max(2, Math.ceil(full[i].length * e)))));
+    onReach(Math.ceil(focusLen * e));
     if (t < 1) requestAnimationFrame(step);
     else then();
   };
@@ -410,30 +501,34 @@ function renderPeek(routes, tween) {
   countUp($('peek'), tween);
 }
 
+// Route cards: the haul up top, the gist below; the second card shows how it differs from the first.
 function renderCompare(routes, budgetMin, tween) {
   const two = routes.length > 1;
-  // [label, value, decimals, prefix, suffix, hero]
-  const rows = [
-    ['Candy', (r) => Math.round(r.candy), 0, '≈ ', '', true],
-    ['Houses', (r) => r.stops.length, 0, '', ''],
-    ['Walking', (r) => r.distM / M_PER_MI, 2, '', ' mi'],
-    ['Climb', (r) => Math.round(r.climbM * FT_PER_M), 0, '', ' ft'],
-    ['Time', (r) => Math.round(r.totalSec / 60), 0, '', ' min'],
-    ['Pieces / min', (r) => r.candy / (r.totalSec / 60) || 0, 1, '', ''],
+  // [label, value, decimals, suffix]
+  const stats = [
+    ['Houses', (r) => r.stops.length, 0, ''],
+    ['Walking', (r) => r.distM / M_PER_MI, 2, ' mi'],
+    ['Climb', (r) => Math.round(r.climbM * FT_PER_M), 0, ' ft'],
+    ['Time', (r) => Math.round(r.totalSec / 60), 0, ' min'],
   ];
   const delta = (a, b) => {
     if (!a) return '';
     const pct = Math.round(((b - a) / a) * 100);
-    return pct ? `${pct > 0 ? '+' : '−'}${Math.abs(pct)}%` : 'same';
+    return `<small class="delta">${pct ? `${pct > 0 ? '+' : '−'}${Math.abs(pct)}%` : 'same'}</small>`;
   };
-  const head = routes.map((r, i) => `<th><button class="route-tab${i === focus ? ' active' : ''}" data-i="${i}" aria-pressed="${i === focus}">
-      <i style="background:${ROUTE_COLORS[i]}"></i>${r.label}</button></th>`).join('');
-  const body = rows.map(([label, val, dec, pre, post, hero]) => `<tr${hero ? ' class="hero"' : ''}><th>${label}</th>${routes.map((r, i) =>
-    `<td>${pre}${num(`${label}:${r.key}`, val(r), dec)}${post}${two && i === 1 ? `<small>${delta(val(routes[0]), val(r))}</small>` : ''}</td>`).join('')}</tr>`).join('');
+  const vs = (i, a, b) => (two && i === 1 ? delta(a, b) : '');
+  const cards = routes.map((r, i) => `<button type="button" class="rcard${i === focus ? ' active' : ''}" data-i="${i}"
+      aria-pressed="${i === focus}" style="--c:${ROUTE_COLORS[i]}">
+    <span class="rc-label"><i></i>${r.label}</span>
+    <span class="rc-haul"><span class="rc-candy">${num(`Candy:${r.key}`, Math.round(r.candy))}</span>
+      <span class="rc-unit">pieces ${vs(i, routes[0].candy, r.candy)}</span></span>
+    <span class="rc-rate">${num(`Rate:${r.key}`, r.candy / (r.totalSec / 60) || 0, 1)} / min</span>
+    <span class="rc-stats">${stats.map(([label, val, dec, post]) => `<span><span class="k">${label}</span>
+      <span class="v">${num(`${label}:${r.key}`, val(r), dec)}${post}${vs(i, val(routes[0]), val(r))}</span></span>`).join('')}</span>
+  </button>`).join('');
   const note = routes[0].note || (routes[1]?.key === 'more' ? `${routes[1].label} walks for up to ${budgetMin + 30} min.` : '');
-  $('compare').innerHTML = `<table class="compare"><thead><tr><th></th>${head}</tr></thead><tbody>${body}</tbody></table>
-    ${note ? `<p class="note">${note}</p>` : ''}`;
-  $('compare').querySelectorAll('.route-tab').forEach((b) => b.addEventListener('click', () => setFocus(+b.dataset.i)));
+  $('compare').innerHTML = `<div class="rcards${two ? ' two' : ''}">${cards}</div>${note ? `<p class="note">${note}</p>` : ''}`;
+  $('compare').querySelectorAll('.rcard').forEach((b) => b.addEventListener('click', () => setFocus(+b.dataset.i)));
   countUp($('compare'), tween);
 }
 
@@ -466,7 +561,7 @@ function renderDirections(g, route, geo) {
       if (span[1] === span[0]) return;
       if (sheet.snap === 'full') sheet.to('half'); // leave some map to fly to
       map.flyToBounds(L.latLngBounds(geo.pts.slice(span[0], span[1] + 1)), {
-        paddingTopLeft: [40, 40], paddingBottomRight: [40, 40 + sheet.visible()], maxZoom: 18, duration: 0.6,
+        ...fitPad(40), maxZoom: 18, duration: 0.6,
       });
     });
   });

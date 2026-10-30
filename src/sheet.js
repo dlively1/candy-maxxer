@@ -1,5 +1,6 @@
 // Phones: the panel is a bottom sheet over a full-screen map. Drag the grab bar (or tap it) to move
 // between three heights: peek (just the haul, or the search bar before a plan), half, and full.
+// On desktop the panel instead floats over the map's left edge.
 // The visible height is published as --sheet-vis so floating bits (share pill, toasts) ride above it.
 
 const MOBILE = matchMedia('(max-width: 760px)');
@@ -22,6 +23,7 @@ export function initSheet(panel, grab) {
     panel.classList.toggle('dragging', !animate);
     panel.style.transform = `translateY(${height() - vis}px)`;
     root.style.setProperty('--sheet-vis', `${vis}px`);
+    root.classList.toggle('sheet-high', vis > innerHeight * 0.6); // too little map left for floating buttons
   };
 
   const to = (name, animate = true) => {
@@ -35,7 +37,7 @@ export function initSheet(panel, grab) {
   const apply = () => {
     panel.style.setProperty('--sheet-h', `${innerHeight - TOP_GAP}px`);
     if (MOBILE.matches) to(snap, false);
-    else { panel.style.transform = ''; panel.classList.remove('dragging'); root.style.removeProperty('--sheet-vis'); vis = 0; }
+    else { panel.style.transform = ''; panel.classList.remove('dragging'); root.style.removeProperty('--sheet-vis'); root.classList.remove('sheet-high'); vis = 0; }
   };
 
   grab.addEventListener('pointerdown', (e) => {
@@ -75,8 +77,10 @@ export function initSheet(panel, grab) {
 
   return {
     to,
-    refresh: () => MOBILE.matches && !drag && to(snap, false), // re-measure after content changes
+    refresh: () => MOBILE.matches && !drag && to(snap), // re-measure after content changes
     visible: () => (MOBILE.matches ? vis : 0),
+    coverLeft: () => (MOBILE.matches ? 0 : panel.offsetLeft + panel.offsetWidth), // desktop: panel floats over the map
+
     get snap() { return snap; },
     get mobile() { return MOBILE.matches; },
   };
