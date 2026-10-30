@@ -42,6 +42,52 @@ button {
 button:disabled { opacity: .5; cursor: progress; }
 button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); font-weight: 600; }
 button.secondary:hover { border-color: var(--ink-3); }
+#share { transition: background .25s, border-color .25s, color .25s, box-shadow .25s; }
+#share.done {
+  background: #2a1840; border-color: #8cff6b; color: #eaffe0;
+  box-shadow: 0 0 0 1px #8cff6b55, 0 0 18px #8cff6b66, inset 0 0 12px #8cff6b33;
+  text-shadow: 0 0 6px #8cff6b;
+}
+#share.sparkle { animation: shiver .5s ease-in-out; }
+@keyframes shiver {
+  0%, 100% { transform: none; } 15% { transform: translateX(-3px) rotate(-1deg); } 30% { transform: translateX(3px) rotate(1deg); }
+  45% { transform: translateX(-2px); } 60% { transform: translateX(2px) scale(1.04); } 80% { transform: scale(1.02); }
+}
+
+.toast {
+  position: fixed; left: 50%; bottom: 24px; z-index: 2000; transform: translate(-50%, 160%);
+  display: flex; align-items: center; gap: 12px; width: max-content; max-width: min(92vw, 420px);
+  background: linear-gradient(180deg, #2a1840, #170f24); color: var(--ink);
+  border: 1px solid #8cff6b66; border-radius: 16px; padding: 16px 18px 14px;
+  box-shadow: 0 0 24px #8cff6b33, 0 14px 40px rgba(0, 0, 0, .55);
+  transition: transform .45s cubic-bezier(.3, 1.5, .5, 1);
+}
+/* ectoplasm dripping off the top edge */
+.toast::before {
+  content: ''; position: absolute; left: 14px; right: 14px; top: -1px; height: 14px; pointer-events: none;
+  background:
+    radial-gradient(5px 9px at 12% 0, #8cff6b 98%, transparent) ,
+    radial-gradient(4px 13px at 31% 0, #8cff6b 98%, transparent),
+    radial-gradient(6px 7px at 52% 0, #8cff6b 98%, transparent),
+    radial-gradient(3.5px 11px at 70% 0, #8cff6b 98%, transparent),
+    radial-gradient(5px 8px at 89% 0, #8cff6b 98%, transparent),
+    linear-gradient(#8cff6b, #8cff6b) top / 100% 2px no-repeat;
+  filter: drop-shadow(0 0 3px #8cff6b99); opacity: .85;
+}
+.toast.in { transform: translate(-50%, 0); animation: haunt .7s steps(1) 1; }
+@keyframes haunt { 0% { opacity: .2; } 12% { opacity: 1; } 22% { opacity: .35; } 30% { opacity: 1; } 44% { opacity: .6; } 52%, 100% { opacity: 1; } }
+.toast b { display: block; font-size: 15px; }
+.toast span { display: block; font-weight: 400; color: var(--ink-2); font-size: 13px; margin-top: 2px; }
+.toast-ghost { font-size: 30px; animation: float 1.4s ease-in-out infinite alternate; filter: drop-shadow(0 0 6px #ffffff55); }
+@keyframes float { from { transform: translateY(2px) rotate(-6deg); } to { transform: translateY(-5px) rotate(6deg); } }
+.toast:has(.toast-link) { flex-direction: column; align-items: stretch; gap: 4px; }
+.toast-link { width: 100%; font: inherit; font-size: 13px; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-top: 6px; }
+.fx-candy, .fx-ghost { position: fixed; left: 0; top: 0; z-index: 2001; font-size: 22px; margin: -11px 0 0 -11px; pointer-events: none; }
+.fx-ghost { font-size: 34px; margin: -17px 0 0 -17px; filter: drop-shadow(0 0 8px #ffffffaa); }
+.fx-bat { animation: batflap .18s ease-in-out infinite alternate; }
+@keyframes batflap { to { scale: 1 .45; } }
+@media (prefers-reduced-motion: reduce) { #share.sparkle, .toast.in, .toast-ghost { animation: none; } .toast { transition: none; } }
 
 #status { margin: 0; min-height: 1.4em; color: var(--ink-2); font-size: 13px; }
 #status.error { color: #ff7a7a; }

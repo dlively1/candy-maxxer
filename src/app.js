@@ -11,6 +11,7 @@ import { renderProfile } from './profile.js';
 import { arrowLayer } from './arrows.js';
 import { buildSteps, stepText } from './directions.js';
 import { createLoader } from './loader.js';
+import { shareLink } from './share.js';
 
 const $ = (id) => document.getElementById(id);
 const M_PER_MI = 1609.344, FT_PER_M = 3.28084;
@@ -80,18 +81,8 @@ function linkUrl() {
   return `${location.origin}${location.pathname}?${q}`;
 }
 
-async function share() {
-  const url = linkUrl();
-  try {
-    if (navigator.share) await navigator.share({ title: 'Candy Maxxer route', url });
-    else { await navigator.clipboard.writeText(url); flash('Link copied!'); }
-  } catch { /* share sheet dismissed */ }
-}
-
-function flash(msg) {
-  const b = $('share'), old = b.textContent;
-  b.textContent = msg;
-  setTimeout(() => { b.textContent = old; }, 1500);
+function share() {
+  return shareLink({ url: linkUrl(), title: 'Candy Maxxer route', button: $('share') });
 }
 
 function status(msg, isError = false) {
