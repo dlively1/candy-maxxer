@@ -1,17 +1,20 @@
 // Fetch and parse OpenStreetMap data: walkable ways + candidate houses.
 
 import { polygonAreaCentroid } from './geo.js';
-import { cacheGet, cacheSet } from './cache.js';
+import { cacheGet, cacheKeys, cacheSet } from './cache.js';
 
 const ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
 ];
 
 export function overpassQuery(lat, lon, radius) {
   const a = `(around:${Math.round(radius)},${lat.toFixed(6)},${lon.toFixed(6)})`;
-  return `[out:json][timeout:90];(way["highway"]${a};way["building"]${a};node["addr:housenumber"]${a};);out geom;`;
+  // Busy servers turn away queries by their declared limits first, so keep them modest: even
+  // the widest download is a few MB and takes seconds.
+  return `[out:json][timeout:25][maxsize:67108864];(way["highway"]${a};way["building"]${a};node["addr:housenumber"]${a};);out geom;`;
 }
 
 // Download sizes we try, smallest first: a 600 m circle covers most routes in a dense
@@ -50,16 +53,47 @@ export function compactOsm(data) {
 
 const cacheKey = (clat, clon, r) => `osm:${clat},${clon}:${r}`;
 
+// Saved downloads with how far they reach from (lat, lon) in every direction, farthest first.
+export function savedAreas(keys, lat, lon) {
+  const out = [];
+  for (const key of keys) {
+    const m = /^osm:(-?[\d.]+),(-?[\d.]+):(\d+)$/.exec(key);
+    if (!m) continue;
+    const dy = (m[1] - lat) * M_PER_DEG, dx = (m[2] - lon) * M_PER_DEG * Math.cos((lat * Math.PI) / 180);
+    out.push({ key, reach: +m[3] + CELL_MARGIN_M - Math.hypot(dx, dy) });
+  }
+  return out.sort((a, b) => b.reach - a.reach);
+}
+
+// Too little reach to plan a worthwhile route from.
+const MIN_FALLBACK_REACH = 400;
+
 // Houses & streets around (lat, lon) covering at least `radius` m: from the cache if any saved
-// download of this cell is big enough, otherwise from Overpass (then saved).
-// Returns { data, radius, cached }.
+// download (this cell's, or a neighbor's) is big enough, otherwise from Overpass (then saved).
+// If Overpass is too busy, settles for the nearest saved download that still reaches a fair way.
+// Returns { data, radius, cached, fallback }.
 export async function loadOsm(lat, lon, radius, onStatus = () => {}) {
   const [clat, clon] = cellCenter(lat, lon);
   for (const r of RADII.filter((x) => x >= radius)) {
     const data = await cacheGet(cacheKey(clat, clon, r));
     if (data) return { data, radius: r, cached: true };
   }
-  const data = compactOsm(await fetchOverpass(clat, clon, radius + CELL_MARGIN_M, onStatus));
+  const saved = savedAreas(cacheKeys(), lat, lon);
+  for (const { key } of saved.filter((s) => s.reach >= radius)) {
+    const data = await cacheGet(key);
+    if (data) return { data, radius, cached: true };
+  }
+  let fetched;
+  try {
+    fetched = await fetchOverpass(clat, clon, radius + CELL_MARGIN_M, onStatus);
+  } catch (e) {
+    for (const { key, reach } of saved.filter((s) => s.reach >= MIN_FALLBACK_REACH)) {
+      const data = await cacheGet(key);
+      if (data) return { data, radius: reach, cached: true, fallback: true };
+    }
+    throw e;
+  }
+  const data = compactOsm(fetched);
   cacheSet(cacheKey(clat, clon, radius), data);
   return { data, radius, cached: false };
 }

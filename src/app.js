@@ -226,13 +226,15 @@ async function loadArea(address, budgetMin, minRadius = 0) {
   const start = pinned?.address === address ? { lat: pinned.lat, lon: pinned.lon, label: address } : await geocode(address);
   loader.stage('Fetching houses & streets…', 0.3);
   const proj = makeProjection(start.lat, start.lon);
-  let osm, ways, houses, downloaded = false;
+  let osm, ways, houses, downloaded = false, fallback = false;
   // Start with the smallest download; step up only if it doesn't hold enough houses.
   for (const r of RADII.filter((x) => x > minRadius)) {
     osm = await loadOsm(start.lat, start.lon, r, status);
     downloaded ||= !osm.cached;
+    fallback ||= !!osm.fallback;
     ({ ways, houses } = parseOsm(osm.data, proj));
-    if (houses.length >= housesWanted(budgetMin)) break;
+    // Servers busy and we made do with a saved area: asking for a wider one would just wait again.
+    if (fallback || houses.length >= housesWanted(budgetMin)) break;
   }
   if (!ways.length) throw new Error('No walkable streets found near that address.');
   const net = buildNetwork(ways, proj);
@@ -243,7 +245,7 @@ async function loadArea(address, budgetMin, minRadius = 0) {
   levelStructures(net, z);
   const snap = net.grid.nearest(0, 0, 400, net.walkable);
   if (!snap) throw new Error('That address is too far from any walkable street.');
-  return { address, start, proj, net, houses, z, houseZ, startNode: snap.id, radius: osm.radius, downloaded };
+  return { address, start, proj, net, houses, z, houseZ, startNode: snap.id, radius: osm.radius, downloaded, fallback };
 }
 
 // One load per address, shared by background prefetches and plans. A longer plan than the
@@ -258,7 +260,7 @@ async function areaFor(address, budgetMin) {
   const job = areaJob;
   let a;
   try { a = await job.promise; } catch (e) { if (areaJob === job) areaJob = null; throw e; }
-  if (a.houses.length < housesWanted(budgetMin) && a.radius < RADII.at(-1) && areaJob === job) {
+  if (a.houses.length < housesWanted(budgetMin) && a.radius < RADII.at(-1) && !a.fallback && areaJob === job) {
     const wider = { address, done: false };
     wider.promise = loadArea(address, budgetMin, a.radius).finally(() => { wider.done = true; });
     areaJob = wider;
@@ -347,7 +349,8 @@ async function solveAndDraw(budgetMin, { quiet = !!shown, quick = true } = {}) {
     editing(false);
   }
   draw({ reveal: !quiet, tween: quiet });
-  status(`Weighed up ${res.routes[0].considered} nearby houses in ${(res.ms / 1000).toFixed(1)} s.`);
+  status(`Weighed up ${res.routes[0].considered} nearby houses in ${(res.ms / 1000).toFixed(1)} s.` +
+    (area.fallback ? ' Map servers were busy, so this used a saved nearby area: it may miss a few streets.' : ''));
   history.replaceState(null, '', linkUrl());
 }
 
