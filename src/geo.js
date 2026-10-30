@@ -50,4 +50,17 @@ export class Grid {
     }
     return best < 0 ? null : { id: best, dist: Math.sqrt(bd) };
   }
+  // Calls fn(id, dist) for every point within maxDist.
+  within(x, y, maxDist, fn) {
+    const ix = Math.floor(x / this.cell), iy = Math.floor(y / this.cell);
+    const r = Math.ceil(maxDist / this.cell), max2 = maxDist * maxDist;
+    for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
+      const b = this.map.get(this.key(ix + dx, iy + dy));
+      if (!b) continue;
+      for (let i = 0; i < b.length; i += 3) {
+        const d = (b[i + 1] - x) ** 2 + (b[i + 2] - y) ** 2;
+        if (d <= max2) fn(b[i], Math.sqrt(d));
+      }
+    }
+  }
 }

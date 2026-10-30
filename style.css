@@ -316,6 +316,84 @@ footer a { color: var(--ink-2); }
 body.replanning .route-flow { opacity: .2; }
 @media (prefers-reduced-motion: reduce) { .uturn-icon span, .home-icon .finish-flag { animation: none !important; } }
 
+/* Choosing a start: haunted houses to tap (windows aglow, a few flickering), a gold pin to drag. */
+.haunt { cursor: pointer; }
+.haunt .hb {
+  display: block; width: 30px; height: 32px; transform: rotate(var(--tilt)) scale(calc(var(--s) * var(--hz, 1))); transform-origin: 50% 70%;
+  transition: transform .28s cubic-bezier(.3, 1.6, .5, 1), filter .25s; animation: haunt-rise .5s cubic-bezier(.3, 1.5, .5, 1) backwards;
+}
+.haunt svg { display: block; width: 30px; height: 32px; overflow: visible; filter: drop-shadow(0 1px 1.5px #000); }
+.haunt .hb-body { fill: #2b2340; stroke: #8f7bb8; stroke-width: 1; stroke-linejoin: round; transition: stroke .25s; }
+.haunt .door { fill: #0d0a14; }
+.haunt .win { fill: #ffb347; opacity: .55; transition: opacity .2s, fill .2s; }
+.haunt.flicker .win { animation: win-flicker 5.3s steps(1) var(--d) infinite; }
+.haunt.flicker .w2 { animation-duration: 7.1s; }
+.haunt.flicker .w3 { animation-duration: 3.7s; }
+.haunt:hover .hb, .haunt.near .hb { transform: rotate(0deg) scale(calc(var(--s) * var(--hz, 1) * 1.3)); filter: drop-shadow(0 0 6px #ffb34799); }
+.haunt:hover .win, .haunt.near .win, .haunt.chosen .win { opacity: 1; fill: #ffd36b; animation: none; }
+.haunt::after { /* a bat takes off from the roof on hover */
+  content: '🦇'; position: absolute; left: 9px; top: -4px; font-size: 13px; line-height: 1; opacity: 0; pointer-events: none;
+}
+.haunt:hover::after { animation: bat-off .9s ease-out forwards; }
+.haunt.chosen .hb { transform: rotate(0deg) scale(calc(var(--s) * 1.35)); filter: drop-shadow(0 0 8px #ffb347) drop-shadow(0 0 2px #ffd36b); }
+.haunt.chosen .hb-body { stroke: #ffd36b; }
+.haunt.just::before { /* picked: a ghost floats up out of the chimney */
+  content: '👻'; position: absolute; left: 8px; top: -8px; font-size: 15px; line-height: 1; opacity: 0; pointer-events: none;
+  animation: ghost-up 1.6s ease-out .1s;
+}
+body.picking .haunt:not(.chosen) .hb-body { fill: #251e37; }
+@keyframes haunt-rise { from { opacity: 0; transform: rotate(var(--tilt)) translateY(8px) scale(calc(var(--s) * var(--hz, 1) * .5)); } }
+@keyframes win-flicker {
+  0%, 100% { opacity: .55; } 7% { opacity: .12; } 9% { opacity: .85; } 12% { opacity: .2; } 14% { opacity: .7; }
+  58% { opacity: .95; } 61% { opacity: .3; } 63% { opacity: .6; }
+}
+@keyframes bat-off {
+  0% { opacity: 0; transform: translate(0, 6px) scale(.4); } 20% { opacity: 1; }
+  100% { opacity: 0; transform: translate(26px, -28px) scale(1) rotate(15deg); }
+}
+@keyframes ghost-up {
+  0% { opacity: 0; transform: translateY(4px) scale(.5); } 25% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-4px, -40px) scale(1.2) rotate(-8deg); }
+}
+
+.start-pin { cursor: grab; }
+.start-pin.leaflet-drag-target { cursor: grabbing; }
+.start-pin .pin-b { display: block; width: 32px; height: 32px; transition: transform .2s cubic-bezier(.3, 1.6, .5, 1); animation: pin-drop .65s cubic-bezier(.3, 1.4, .5, 1) backwards; }
+.start-pin svg { display: block; width: 32px; height: 32px; filter: drop-shadow(0 0 6px #f5c54299) drop-shadow(0 2px 3px #000); animation: pin-bob 2.6s ease-in-out .65s infinite; }
+.start-pin .pin-stem { position: absolute; left: 15px; top: 31px; width: 2px; height: 15px; border-radius: 1px; background: linear-gradient(#f5c542, #f5c54200); }
+.start-pin.leaflet-drag-target .pin-b { transform: translateY(-8px) scale(1.15); }
+@keyframes pin-drop { from { opacity: 0; transform: translateY(-46px) scale(.6); } 60% { opacity: 1; transform: translateY(3px) scale(1.08, .9); } }
+@keyframes pin-bob { 50% { transform: translateY(-3px); } }
+
+/* Over the map while choosing: where you'll start, and the button to plan from there. */
+#pickbar {
+  position: absolute; top: calc(12px + env(safe-area-inset-top)); left: calc(50% + 194px); z-index: 600; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px; width: max-content; max-width: min(540px, calc(100% - 430px));
+  padding: 8px 8px 8px 16px; border-radius: 18px; background: #1d1630eb; border: 1px solid var(--line);
+  box-shadow: 0 8px 26px #000a, 0 0 22px #fb8a2e22; backdrop-filter: blur(6px); animation: pickbar-in .35s cubic-bezier(.3, 1.4, .5, 1);
+}
+#pickbar[hidden] { display: none; }
+#pickbar.error { border-color: #a8463f; }
+#pickMsg { display: flex; flex-direction: column; min-width: 0; padding: 2px 0; }
+#pickMsg b { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#pickMsg small { color: var(--ink-2); font-size: 12.5px; }
+#planHere {
+  flex: none; height: 40px; padding: 0 16px; border: 0; border-radius: 20px; cursor: pointer;
+  font: inherit; font-weight: 700; font-size: 14px; color: #1a0f05; white-space: nowrap;
+  background: linear-gradient(180deg, #ffa24d, #f0761a); box-shadow: 0 3px 10px #0007, 0 0 14px #fb8a2e88;
+  animation: pill-glow 2.8s ease-in-out infinite; transition: transform .2s;
+}
+#planHere[hidden] { display: none; }
+#planHere:hover { transform: translateY(-1px) scale(1.04); }
+#planHere:active { transform: scale(.96); }
+#planHere:disabled { opacity: .6; cursor: progress; }
+#planHere:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+@keyframes pickbar-in { from { opacity: 0; transform: translate(-50%, -10px) scale(.96); } }
+@media (prefers-reduced-motion: reduce) {
+  .haunt .hb, .haunt.flicker .win, .haunt:hover::after, .haunt.just::before,
+  .start-pin .pin-b, .start-pin svg, #pickbar, #planHere { animation: none; }
+}
+
 /* Quick re-plans: the map stays put, the numbers dim, a pumpkin spins up top. */
 #replan {
   position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 50%; z-index: 600; transform: translateX(-50%);
@@ -388,6 +466,12 @@ body.replanning #results, body.replanning .pk-haul { opacity: .5; }
   .seg button { padding: 10px 6px; }
 
   #stage #share { bottom: calc(var(--sheet-vis, 0px) + 14px); }
+  /* Choosing on a phone: the bar rides just above the sheet, under your thumb. */
+  #stage #pickbar {
+    top: auto; bottom: calc(var(--sheet-vis, 0px) + 12px); left: 12px; right: 12px; transform: none; width: auto; max-width: none;
+    transition: bottom .42s cubic-bezier(.2, .9, .25, 1), opacity .2s; animation-name: pickbar-up;
+  }
+  .sheet-high #stage #pickbar { opacity: 0; visibility: hidden; pointer-events: none; }
   #stage #share-hint { bottom: calc(var(--sheet-vis, 0px) + 66px); }
   .sheet-high #stage #share, .sheet-high #share-hint { opacity: 0; visibility: hidden; pointer-events: none; }
   #stage #share { transition: background .25s, color .25s, transform .2s, opacity .2s, bottom .42s cubic-bezier(.2, .9, .25, 1); }
@@ -395,6 +479,7 @@ body.replanning #results, body.replanning .pk-haul { opacity: .5; }
   .rcards:not(.two) { display: none; }
   .leaflet-top { top: env(safe-area-inset-top); }
 }
+@keyframes pickbar-up { from { opacity: 0; transform: translateY(10px); } }
 .night-tiles { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6); }
 
 /* Floating share pill: sits on the map, collapses to just the pumpkin while the map is in use. */

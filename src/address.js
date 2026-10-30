@@ -1,8 +1,13 @@
-// The address box: type-ahead suggestions (Photon, OpenStreetMap-based, CORS-friendly) biased
-// toward where you are, plus "use my location" via the browser's geolocation.
+// The address box: type-ahead suggestions (houses already on the map first, then Photon,
+// OpenStreetMap-based and CORS-friendly, kept near where you are), plus "use my location".
 
 const PHOTON = 'https://photon.komoot.io';
 const DEBOUNCE_MS = 220;
+
+// Within this of the bias point (degrees of latitude, ~30 km) unless they typed a town after a comma.
+const NEAR_DEG = 0.27;
+// Transit stops match street names ("Main St at Penn Ave") but nobody starts there.
+const SKIP_TAGS = '&osm_tag=!highway:bus_stop&osm_tag=!public_transport&osm_tag=!railway';
 
 const ICONS = { house: '🏠', residential: '🏠', street: '🛣️', city: '🏙️', town: '🏘️', village: '🏘️', suburb: '🏘️' };
 
@@ -13,7 +18,21 @@ export function featureLabel(p) {
   return [line1, place && place !== line1 ? place : null, p.state].filter(Boolean).join(', ');
 }
 
-export function addressBox({ input, list, getBias, onPick }) {
+// "Pittsburgh, Pennsylvania" from a Photon feature.
+export const placeLabel = (p) => [p.city || p.town || p.village || p.district || p.county, p.state].filter(Boolean).join(', ');
+
+// Photon's properties for the nearest named thing to (lat, lon), or null.
+export async function reverse(lat, lon) {
+  try {
+    const res = await fetch(`${PHOTON}/reverse?lat=${lat}&lon=${lon}&limit=1&lang=en`);
+    return (await res.json()).features?.[0]?.properties ?? null;
+  } catch { return null; }
+}
+
+// getBias() → { lat, lon, strict } or null. strict: only suggest places nearby.
+// local(q) → suggestions from data already loaded (shown first, instantly).
+
+export function addressBox({ input, list, getBias, local = () => [], onPick }) {
   let timer = 0, ctrl = null, items = [], active = -1;
 
   const close = () => {
@@ -49,28 +68,46 @@ export function addressBox({ input, list, getBias, onPick }) {
     highlight(-1);
   };
 
+  const photon = async (q, bias, near, signal) => {
+    let url = `${PHOTON}/api/?q=${encodeURIComponent(q)}&limit=6&lang=en${SKIP_TAGS}`;
+    if (bias) url += `&lat=${bias.lat}&lon=${bias.lon}&location_bias_scale=0.1&zoom=13`;
+    if (near) {
+      const dLon = NEAR_DEG / Math.cos((bias.lat * Math.PI) / 180);
+      url += `&bbox=${[bias.lon - dLon, bias.lat - NEAR_DEG, bias.lon + dLon, bias.lat + NEAR_DEG].map((v) => v.toFixed(4))}`;
+    }
+    const res = await fetch(url, { signal });
+    return (await res.json()).features;
+  };
+
   const search = async (q) => {
     ctrl?.abort();
     ctrl = new AbortController();
     const bias = getBias();
-    const url = `${PHOTON}/api/?q=${encodeURIComponent(q)}&limit=6&lang=en${bias ? `&lat=${bias.lat}&lon=${bias.lon}` : ''}`;
+    const mine = local(q);
+    items = mine;
+    if (mine.length && document.activeElement === input) render();
     try {
-      const res = await fetch(url, { signal: ctrl.signal });
-      const { features } = await res.json();
+      // Nearby only, unless they named a town ("…, Columbus") or nothing nearby matches.
+      const near = bias?.strict && !q.includes(',');
+      let features = await photon(q, bias, near, ctrl.signal);
+      if (near && !features.length) features = await photon(q, bias, false, ctrl.signal);
       // If they typed a house number but OSM only knows the street, keep their number
       // and let the regular geocoder find the exact spot when they plan.
       const typedNum = q.match(/^\s*(\d+[a-z]?)\s/i)?.[1];
-      items = features.map((f) => {
+      const found = features.map((f) => {
         const p = f.properties;
         const [lon, lat] = f.geometry.coordinates;
         const keepNum = typedNum && !p.housenumber && p.osm_key === 'highway';
         const label = keepNum ? `${typedNum} ${featureLabel(p)}` : featureLabel(p);
         const [main, ...rest] = label.split(', ');
         return { label, main, sub: rest.join(', '), icon: ICONS[p.osm_value] || ICONS[p.type] || '📍', ...(keepNum ? {} : { lat, lon }) };
-      }).filter((it, i, a) => it.label && a.findIndex((x) => x.label === it.label) === i);
+      });
+      const seen = (it) => mine.some((m) => m.main.toLowerCase() === it.main.toLowerCase());
+      items = [...mine, ...found.filter((it) => !seen(it))]
+        .filter((it, i, a) => it.label && a.findIndex((x) => x.label === it.label) === i).slice(0, 7);
       if (document.activeElement === input) render();
     } catch (e) {
-      if (e.name !== 'AbortError') { items = []; close(); }
+      if (e.name !== 'AbortError' && !mine.length) { items = []; close(); }
     }
   };
 
@@ -102,13 +139,8 @@ export async function locate() {
     enableHighAccuracy: true, timeout: 12000, maximumAge: 5 * 60 * 1000,
   }));
   const { latitude: lat, longitude: lon } = pos.coords;
-  let label = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
-  try {
-    const res = await fetch(`${PHOTON}/reverse?lat=${lat}&lon=${lon}&limit=1&lang=en`);
-    const f = (await res.json()).features?.[0];
-    if (f) label = featureLabel(f.properties);
-  } catch { /* keep the coordinates as the label */ }
-  return { lat, lon, label };
+  const p = await reverse(lat, lon);
+  return { lat, lon, label: p ? featureLabel(p) : `${lat.toFixed(5)}, ${lon.toFixed(5)}` };
 }
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);

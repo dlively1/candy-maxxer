@@ -1,4 +1,5 @@
-// Wires the pipeline to the page: geocode → OSM → elevation → graph → solver worker → map.
+// Wires the pipeline to the page: a start (picked on the map, found, or geocoded) → OSM →
+// elevation → graph → solver worker → map.
 
 import { geocode } from './geocode.js';
 import { loadOsm, parseOsm, RADII } from './osm.js';
@@ -13,16 +14,40 @@ import { buildSteps, stepText, turnaroundPoints } from './directions.js';
 import { createLoader } from './loader.js';
 import { shareLink } from './share.js';
 import { initPill } from './pill.js';
-import { addressBox, locate } from './address.js';
+import { addressBox, locate, reverse, placeLabel } from './address.js';
 import { initSheet } from './sheet.js';
 
 const $ = (id) => document.getElementById(id);
 const M_PER_MI = 1609.344, FT_PER_M = 3.28084;
 const ROUTE_COLORS = ['#de7218', '#358de8']; // validated pair: distinct under color-vision deficiency
 const reduced = matchMedia('(prefers-reduced-motion: reduce)');
-const HOME_SVG = `<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14.5" fill="#14111c" stroke="#f5c542" stroke-width="2"/>
-  <path d="M8.5 16.5 16 9.5l7.5 7V24h-15Z" fill="#f5c542"/><rect x="14" y="18.5" width="4" height="5.5" rx="1" fill="#14111c"/></svg>
-  <span class="finish-flag" aria-hidden="true">🏁</span>`;
+const canHover = matchMedia('(hover: hover)');
+const HOME_BADGE = `<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14.5" fill="#14111c" stroke="#f5c542" stroke-width="2"/>
+  <path d="M8.5 16.5 16 9.5l7.5 7V24h-15Z" fill="#f5c542"/><rect x="14" y="18.5" width="4" height="5.5" rx="1" fill="#14111c"/></svg>`;
+const HOME_SVG = `${HOME_BADGE}<span class="finish-flag" aria-hidden="true">🏁</span>`;
+// The start pin while choosing: the home badge on a little stem, floating over its haunted house.
+const PIN_HTML = `<span class="pin-b">${HOME_BADGE}</span><i class="pin-stem"></i>`;
+// Haunted houses to pick a start from: a towered one (drawn either way round) and a gabled one
+// with a crooked chimney. Windows glow; each house gets its own tilt, size and flicker.
+const HAUNTS = [
+  `<path class="hb-body" d="M4 33V18l9-8.5 9 8.5v15Z"/><path class="hb-body" d="M20.5 33V13l3.75-8 3.75 8v20Z"/>
+  <rect class="win" x="7.5" y="21" width="3" height="4" rx=".5"/><rect class="win w2" x="14" y="21" width="3" height="4" rx=".5"/>
+  <rect class="win w3" x="23" y="15" width="2.5" height="3.5" rx="1.2"/><path class="door" d="M11.2 33v-4.5a1.8 1.8 0 0 1 3.6 0V33Z"/>`,
+  `<path class="hb-body" d="M20 13.5V5.5l3.4-.8v11.5Z"/><path class="hb-body" d="M3 33V18.5L15.5 7 28 18.5V33Z"/>
+  <circle class="win w3" cx="15.5" cy="16" r="2"/><rect class="win" x="7" y="22" width="3.4" height="4.2" rx=".5"/>
+  <rect class="win w2" x="20.6" y="22" width="3.4" height="4.2" rx=".5"/><path class="door" d="M13.6 33v-5a1.9 1.9 0 0 1 3.8 0v5Z"/>`,
+];
+const hauntSvg = (v) => `<svg viewBox="0 0 32 34" aria-hidden="true">${
+  v === 1 ? `<g transform="matrix(-1 0 0 1 32 0)">${HAUNTS[0]}</g>` : HAUNTS[v ? 1 : 0]}</svg>`;
+function hauntIcon(id, extra = '') {
+  const r = (k) => ((((id * (7919 * k + 13)) % 1000) + 1000) % 1000) / 1000; // steady per-house "random"
+  return L.divIcon({
+    className: `haunt${r(4) < 0.3 ? ' flicker' : ''}${extra}`,
+    html: `<span class="hb" style="--tilt:${((r(1) - 0.5) * 10).toFixed(1)}deg;--s:${(0.88 + r(2) * 0.24).toFixed(2)};--d:${(-r(5) * 5).toFixed(2)}s">${
+      hauntSvg(Math.floor(r(3) * 3))}</span>`,
+    iconSize: [30, 32], iconAnchor: [15, 22], tooltipAnchor: [0, -22],
+  });
+}
 // Turnarounds: a little U-turn badge in the route's color, so a mid-street end of the line reads as "come back".
 const uturnSvg = (color) => `<svg viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="11.5" fill="#14111c" stroke="${color}" stroke-width="2"/>
   <path d="M9 19v-7.5a4 4 0 0 1 8 0V17" fill="none" stroke="#fff3d6" stroke-width="2.2" stroke-linecap="round"/>
@@ -40,6 +65,8 @@ const layers = {
   arrows: L.layerGroup().addTo(map),
   highlight: L.layerGroup().addTo(map),
   cursor: L.layerGroup().addTo(map),
+  haunts: L.layerGroup().addTo(map), // haunted houses to pick a start from
+  pick: L.layerGroup().addTo(map),   // the start pin while choosing
 };
 
 const worker = new Worker(new URL('./solver.worker.js', import.meta.url), { type: 'module' });
@@ -56,7 +83,7 @@ worker.onmessage = ({ data }) => {
 };
 const overrides = JSON.parse(localStorage.getItem('cm:overrides') || '{}');
 
-let area = null;     // loaded neighborhood: { address, start, proj, net, houses, z, houseZ, startNode }
+let area = null;     // loaded neighborhood: { center, proj, net, houses, z, houseZ, radius, place, startNode }
 let solveSeq = 0;
 let shown = null;    // last plan: { g, routes, budgetMin }
 let focus = 0;       // which route the directions / arrows follow
@@ -107,7 +134,7 @@ for (const seg of document.querySelectorAll('.seg')) {
   sync();
 }
 
-for (const id of ['budget', 'pace', 'porch', 'alt']) $(id).addEventListener('change', () => { planSummary(); if (area) run(); });
+for (const id of ['budget', 'pace', 'porch', 'alt']) $(id).addEventListener('change', () => { planSummary(); if (phase === 'plan') run(); });
 
 // Once there's a plan, the form folds into a one-line summary; tap it to edit.
 const formBody = $('formBody');
@@ -148,26 +175,44 @@ placeControls();
 const fitPad = (px) => ({ paddingTopLeft: [px + sheet.coverLeft(), px], paddingBottomRight: [px, px + sheet.visible()] });
 $('address').addEventListener('focus', () => sheet.to('full'));
 
-// A spot we already have coordinates for (a picked suggestion or "my location"): skip geocoding.
-let pinned = null; // { address, lat, lon }
-const pin = (address, lat, lon) => { pinned = lat == null ? null : { address, lat, lon }; };
+// Where the route starts and ends: { lat, lon, label, house? } (house: the OSM id of a picked house).
+// Once picked or found it stays put (and is remembered), so GPS jitter never moves it.
+let start = null;
+let here = null;    // the last "my location" fix, for nearby suggestions
+let phase = 'idle'; // 'idle' | 'pick' (choosing a start on the map) | 'plan' (a route is on screen)
+const START_KEY = 'cm:start';
+
+function setStart(s) {
+  start = s;
+  $('address').value = s.label;
+  planSummary();
+  try { localStorage.setItem(START_KEY, JSON.stringify(s)); } catch { /* no storage */ }
+  if (phase === 'pick') showPin();
+}
+
 addressBox({
   input: $('address'),
   list: $('addr-list'),
-  getBias: () => pinned || area?.start || (({ lat, lng }) => ({ lat, lon: lng }))(map.getCenter()),
-  onPick: (it) => { pin(it.label, it.lat, it.lon); run(); },
+  // Suggest places near what's on screen (or where they are), not across the country.
+  getBias: () => {
+    const c = map.getCenter();
+    if (map.getZoom() >= 13) return { lat: c.lat, lon: c.lng, strict: true };
+    const p = start || here;
+    return p ? { lat: p.lat, lon: p.lon, strict: true } : { lat: c.lat, lon: c.lng, strict: false };
+  },
+  local: localMatches,
+  onPick: pickSuggestion,
 });
 $('locate').addEventListener('click', () => useMyLocation(false));
 $('address').addEventListener('change', prefetch); // typed a new address and moved on
+$('planHere').addEventListener('click', run);
 
 async function useMyLocation(quiet) {
   const btn = $('locate');
   btn.classList.add('busy');
   try {
-    const here = await locate();
-    $('address').value = here.label;
-    pin(here.label, here.lat, here.lon);
-    run();
+    here = await locate();
+    await chooseStart(here, { gps: true });
   } catch (e) {
     // Denied, unavailable, or timed out: the default address is still there to use.
     if (quiet) prefetch();
@@ -175,6 +220,254 @@ async function useMyLocation(quiet) {
   } finally {
     btn.classList.remove('busy');
   }
+}
+
+// Suggestions from houses already on the map: "12 elm st" finds 12 Elm Street instantly.
+const ABBR = { street: 'st', avenue: 'ave', road: 'rd', drive: 'dr', lane: 'ln', court: 'ct', circle: 'cir', place: 'pl', boulevard: 'blvd', terrace: 'ter' };
+const norm = (t) => ` ${t.toLowerCase().replace(/[^a-z0-9]+/g, ' ')} `
+  .replace(/ (street|avenue|road|drive|lane|court|circle|place|boulevard|terrace)(?= )/g, (_, w) => ` ${ABBR[w]}`).trim();
+function localMatches(q) {
+  const want = norm(q.split(',')[0]);
+  if (!area || want.length < 3) return [];
+  const out = [];
+  for (const h of area.houses) {
+    if (!h.address || !norm(h.address).startsWith(want)) continue;
+    out.push({ label: houseLabel(h), main: h.address, sub: area.place || 'On the map', icon: '🏚️', lat: h.lat, lon: h.lon, house: h.id });
+    if (out.length === 4) break;
+  }
+  return out;
+}
+
+async function pickSuggestion(it) {
+  try {
+    // A street with their house number but no exact spot: the geocoder finds it.
+    const pt = it.lat != null ? it : await geocode(it.label);
+    await chooseStart({ lat: pt.lat, lon: pt.lon, label: it.label, house: it.house });
+  } catch (e) {
+    status(e.message, true);
+  }
+}
+
+// --- Choosing a start on the map ---
+
+const metersApart = (a, b) => Math.hypot((a.lat - b.lat) * 111320, (a.lon - b.lon) * 111320 * Math.cos((a.lat * Math.PI) / 180));
+const inArea = (a, pt) => !!a && metersApart(a.center, pt) <= a.radius;
+
+// Fly so pt lands in the middle of the map that isn't under the panel.
+function flyToVisible(pt, zoom) {
+  const shift = L.point(sheet.coverLeft() / 2, -sheet.visible() / 2);
+  const c = map.unproject(map.project([pt.lat, pt.lon], zoom).subtract(shift), zoom);
+  if (reduced.matches) map.setView(c, zoom, { animate: false });
+  else map.flyTo(c, zoom, { duration: 1.1 });
+}
+
+function enterPick() {
+  if (phase === 'plan') clearPlan();
+  phase = 'pick';
+  document.body.classList.add('picking');
+}
+
+function leavePick() {
+  phase = 'plan';
+  document.body.classList.remove('picking');
+  layers.pick.clearLayers();
+  renderHaunts();
+  $('pickbar').hidden = true;
+}
+
+function clearPlan() {
+  shown = null;
+  stopOrder = [];
+  routeLines = [];
+  for (const k of ['route', 'arrows', 'highlight', 'cursor']) layers[k].clearLayers();
+  document.body.classList.remove('has-plan');
+  editing(false);
+  $('results').hidden = true;
+  $('share').hidden = true;
+  $('addrField').setAttribute('data-peek', '');
+  sheet.refresh();
+}
+
+// Show the neighborhood around pt and start there: on its house if one is that close, otherwise
+// on the street. Then tap another haunted house, or drag the pin, to change it.
+let pickSeq = 0;
+async function chooseStart(pt, { gps = false } = {}) {
+  const seq = ++pickSeq;
+  enterPick();
+  sheet.to('peek'); // on a phone, make room for the neighborhood
+  flyToVisible(pt, Math.max(17, map.getZoom()));
+  const keep = !gps && pt.label; // their words (a typed or saved address) beat a made-up label
+  setStart({ lat: pt.lat, lon: pt.lon, label: pt.label || 'Dropped pin', ...(pt.house != null ? { house: pt.house } : {}) });
+  pickbar('loading');
+  const placeP = area && inArea(area, pt) && area.place !== undefined ? null : reverse(pt.lat, pt.lon);
+  let a;
+  try {
+    a = await areaFor(pt, +$('budget').value, { quick: true });
+  } catch (e) {
+    if (seq === pickSeq) pickbar('error', e.message);
+    return;
+  }
+  if (placeP) { const p = await placeP; a.place ??= p ? placeLabel(p) : ''; }
+  if (seq !== pickSeq) return;
+  $('status').textContent = '';
+  useArea(a);
+  const byId = pt.house != null ? a.houses.findIndex((h) => h.id === pt.house) : -1;
+  const i = byId >= 0 ? byId : houseNear(pt, gps ? 40 : 30);
+  if (i >= 0) pickHouse(i, { label: keep || null, fanfare: !keep });
+  else pickStreet(pt, { label: keep || null });
+}
+
+// A tap on the map or a dropped pin: the house there, else the street, else look around there.
+function pickSpot(ll, { replan = false } = {}) {
+  const pt = { lat: ll.lat, lon: ll.lng };
+  if (!inArea(area, pt)) { chooseStart(pt); return; }
+  const i = houseNear(pt, 30);
+  if (i >= 0) pickHouse(i); else pickStreet(pt);
+  if (replan) run();
+}
+
+function pickHouse(i, { label = null, fanfare = true } = {}) {
+  const h = area.houses[i];
+  setStart({ lat: h.lat, lon: h.lon, label: label || houseLabel(h), house: h.id });
+  if (phase !== 'plan') area.houses.forEach(styleHouse);
+  const m = haunts.get(i)?.getElement();
+  if (fanfare && m) { m.classList.remove('just'); void m.offsetWidth; m.classList.add('just'); }
+}
+
+function pickStreet(pt, { label = null } = {}) {
+  const [x, y] = area.proj.toXY(pt.lat, pt.lon);
+  const s = area.net.grid.nearest(x, y, 150);
+  const at = s ? { lat: area.net.lat[s.id], lon: area.net.lon[s.id] } : pt;
+  setStart({ ...at, label: label || withPlace(nameNear(...area.proj.toXY(at.lat, at.lon)) || 'Dropped pin') });
+  if (phase !== 'plan') area.houses.forEach(styleHouse);
+}
+
+function houseNear(pt, maxM) {
+  const [x, y] = area.proj.toXY(pt.lat, pt.lon);
+  let best = -1, bd = maxM;
+  area.houses.forEach((h, i) => { const d = Math.hypot(h.x - x, h.y - y); if (d < bd) { bd = d; best = i; } });
+  return best;
+}
+
+// The nearest real street name (not "driveway" or "footpath") within 150 m.
+const GENERIC = new Set(['unnamed road', 'driveway', 'footpath', 'steps']);
+function nameNear(x, y) {
+  const { net } = area;
+  let best = null, bd = Infinity;
+  net.grid.within(x, y, 150, (id, d) => {
+    if (d >= bd) return;
+    const name = [...net.nodeNames[id]].map((k) => net.names[k]).find((n) => !GENERIC.has(n));
+    if (name) { best = name; bd = d; }
+  });
+  return best;
+}
+const withPlace = (t) => (area.place ? `${t}, ${area.place}` : t);
+function houseLabel(h) {
+  if (h.address) return withPlace(h.address);
+  const street = nameNear(h.x, h.y);
+  return withPlace(street ? `House on ${street}` : 'Haunted house');
+}
+
+// The bar over the map while choosing: where you'll start, and the button to plan from there.
+let barState = 'loading', barMsg = '';
+function pickbar(state = barState, msg = barMsg) {
+  barState = state; barMsg = msg;
+  const bar = $('pickbar');
+  bar.hidden = phase !== 'pick';
+  bar.classList.toggle('error', state === 'error');
+  $('planHere').hidden = state !== 'start';
+  if (state === 'loading') { $('pickMsg').innerHTML = '<b>Summoning the neighborhood…</b><small>🦇 Fetching houses & streets</small>'; return; }
+  if (state === 'error') { $('pickMsg').innerHTML = `<b>${esc(msg)}</b><small>Try another spot, or type an address.</small>`; return; }
+  const tip = !area?.houses.length ? 'No houses are mapped right here 🕸️ Drag the pin to change it.'
+    : hauntsHidden ? 'Zoom in to see the haunted houses 🔍'
+    : 'Tap a haunted house, or drag the pin, to change it.';
+  $('pickMsg').innerHTML = `<b>Start at ${esc(start.label.split(',')[0])}</b><small>${tip}</small>`;
+}
+
+// The draggable start pin, over its haunted house (or a lone one on the street).
+function showPin() {
+  layers.pick.clearLayers();
+  if (!start) return;
+  const ready = inArea(area, start); // before its neighborhood loads, just the pin
+  if (ready && !area.houses.some((h) => h.id === start.house)) {
+    L.marker([start.lat, start.lon], { icon: hauntIcon(Math.round(start.lat * 1e5 + start.lon * 1e5), ' chosen lone'), interactive: false, keyboard: false })
+      .addTo(layers.pick);
+  }
+  const pin = L.marker([start.lat, start.lon], {
+    icon: L.divIcon({ className: 'start-pin', html: PIN_HTML, iconSize: [32, 46], iconAnchor: [16, 70] }),
+    draggable: true, zIndexOffset: 2000, keyboard: false,
+  }).addTo(layers.pick);
+  dragPreview(pin);
+  pin.on('dragend', (e) => pickSpot(e.target.getLatLng()));
+  renderHaunts();
+  if (ready) pickbar('start');
+}
+
+// While a start marker is dragged, light up the house it would land on.
+let previewing = -1;
+function preview(i) {
+  if (i === previewing) return;
+  const old = previewing;
+  previewing = i;
+  if (old >= 0) { haunts.get(old)?.getElement()?.classList.remove('near'); styleHouse(area.houses[old], old); }
+  if (i >= 0) {
+    haunts.get(i)?.getElement()?.classList.add('near');
+    housePolys[i]?.setStyle({ color: '#ffd36b', fillColor: '#ffd36b', fillOpacity: 0.9 });
+  }
+}
+function dragPreview(marker) {
+  let raf = 0;
+  marker.on('drag', (e) => {
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => area && preview(houseNear({ lat: e.latlng.lat, lon: e.latlng.lng }, 30)));
+  });
+  marker.on('dragend', () => { cancelAnimationFrame(raf); preview(-1); });
+}
+
+// Haunted houses on screen while choosing: zoomed in, and in a dense neighborhood only the ones
+// nearest the middle of the map, so there are never too many to draw smoothly.
+const HAUNT_ZOOM = 16.5, HAUNT_MAX = 220;
+const haunts = new Map(); // house index → marker
+let hauntsFor = null, hauntsHidden = false;
+function renderHaunts() {
+  const on = phase === 'pick' && !!area && map.getZoom() >= HAUNT_ZOOM;
+  let near = [];
+  if (on) {
+    const b = map.getBounds().pad(0.15), c = map.getCenter();
+    area.houses.forEach((h, i) => { if (b.contains([h.lat, h.lon])) near.push([i, (h.lat - c.lat) ** 2 + ((h.lon - c.lng) * 0.77) ** 2]); });
+    if (near.length > HAUNT_MAX) near = near.sort((a, b2) => a[1] - b2[1]).slice(0, HAUNT_MAX);
+  }
+  const want = new Set(near.map(([i]) => i));
+  hauntsHidden = phase === 'pick' && !!area?.houses.length && !on;
+  map.getContainer().style.setProperty('--hz', map.getZoom() >= 18 ? 1 : 0.8); // a touch smaller when they're packed in
+  if (hauntsFor !== area) { layers.haunts.clearLayers(); haunts.clear(); hauntsFor = area; }
+  for (const [i, m] of haunts) if (!want.has(i)) { m.remove(); haunts.delete(i); }
+  for (const i of want) {
+    if (haunts.has(i)) continue;
+    const h = area.houses[i];
+    const m = L.marker([h.lat, h.lon], { icon: hauntIcon(h.id), keyboard: false, riseOnHover: true })
+      .on('click', (e) => { L.DomEvent.stopPropagation(e); pickHouse(i); });
+    if (canHover.matches) m.bindTooltip(esc(h.address || 'Haunted house'), { direction: 'top' }); // on touch it would cover the pin
+    haunts.set(i, m.addTo(layers.haunts));
+  }
+  for (const [i, m] of haunts) {
+    const me = area.houses[i].id === start?.house;
+    m.getElement()?.classList.toggle('chosen', me);
+    m.setZIndexOffset(me ? 500 : 0);
+  }
+  if (phase === 'pick' && barState === 'start') pickbar();
+}
+map.on('moveend', renderHaunts);
+map.on('click', (e) => {
+  if (phase === 'pick') pickSpot(e.latlng);
+  else if (phase === 'idle' && map.getZoom() >= 15) chooseStart({ lat: e.latlng.lat, lon: e.latlng.lng });
+});
+
+function useArea(a) {
+  area = a;
+  if (housesFor !== area) buildHouses();
+  area.houses.forEach(styleHouse);
+  renderHaunts();
 }
 
 // Directions are tucked away unless someone wants them; remember their choice.
@@ -195,12 +488,16 @@ function readUrl() {
     else el.value = v;
     el.dispatchEvent(new Event('input'));
   }
+  // The exact start, so a shared link never re-geocodes somewhere slightly different.
+  const at = (q.get('at') || '').split(',').map(Number);
+  if (q.has('address') && at.length === 2 && at.every(Number.isFinite)) setStart({ lat: at[0], lon: at[1], label: $('address').value.trim() });
   return q.has('address') && $('address').value.trim();
 }
 
 function linkUrl() {
   const q = new URLSearchParams();
   for (const [key, id] of Object.entries(PARAMS)) q.set(key, key === 'address' ? $(id).value.trim() : $(id).value);
+  if (start?.label === $('address').value.trim()) q.set('at', `${start.lat.toFixed(6)},${start.lon.toFixed(6)}`);
   return `${location.origin}${location.pathname}?${q}`;
 }
 
@@ -220,86 +517,103 @@ function status(msg, isError = false) {
 // (The solver keeps ~5 per minute as candidates, but real routes visit about 1 per minute.)
 const housesWanted = (budgetMin) => Math.max(150, budgetMin * 3);
 
-async function loadArea(address, budgetMin, minRadius = 0) {
-  status('Finding address…');
-  loader.stage('Finding address…', 0.05);
-  const start = pinned?.address === address ? { lat: pinned.lat, lon: pinned.lon, label: address } : await geocode(address);
+const NO_HOUSES = 'OpenStreetMap doesn’t have any houses mapped around here yet, so there’s nowhere to trick-or-treat. 🕸️';
+// A start this close to a loaded neighborhood's center reuses it: one ~200 m download cell, or
+// more in a wide download, as long as ~600 m of it still lies beyond the start.
+const REUSE_M = 200;
+const covers = (a, pt) => !!a && metersApart(a.center, pt) <= Math.max(REUSE_M, (a.radius ?? 0) - 600);
+const enough = (a, budgetMin) => a.fallback || a.radius >= RADII.at(-1) || a.houses.length >= housesWanted(budgetMin);
+
+// Houses, streets and hills around center: the smallest download (above minRadius, up to
+// maxRadius) that holds enough houses for a plan this long.
+async function loadArea(center, budgetMin, minRadius = 0, maxRadius = Infinity) {
   loader.stage('Fetching houses & streets…', 0.3);
-  const proj = makeProjection(start.lat, start.lon);
+  const proj = makeProjection(center.lat, center.lon);
   let osm, ways, houses, downloaded = false, fallback = false;
-  // Start with the smallest download; step up only if it doesn't hold enough houses.
-  for (const r of RADII.filter((x) => x > minRadius)) {
-    osm = await loadOsm(start.lat, start.lon, r, status);
+  for (const r of RADII.filter((x) => x > minRadius && x <= maxRadius)) {
+    osm = await loadOsm(center.lat, center.lon, r, status);
     downloaded ||= !osm.cached;
     fallback ||= !!osm.fallback;
     ({ ways, houses } = parseOsm(osm.data, proj));
     // Servers busy and we made do with a saved area: asking for a wider one would just wait again.
     if (fallback || houses.length >= housesWanted(budgetMin)) break;
   }
-  if (!ways.length) throw new Error('No walkable streets found near that address.');
+  if (!ways.length) throw new Error('No walkable streets found near there.');
   const net = buildNetwork(ways, proj);
   status(`Measuring hills under ${net.n.toLocaleString()} street points…`);
   loader.stage(`Measuring hills under ${net.n.toLocaleString()} street points…`, 0.4);
   const all = await elevations([...net.lat.map((la, i) => [la, net.lon[i]]), ...houses.map((h) => [h.lat, h.lon])]);
   const z = all.subarray(0, net.n), houseZ = all.subarray(net.n);
   levelStructures(net, z);
-  const snap = net.grid.nearest(0, 0, 400, net.walkable);
-  if (!snap) throw new Error('That address is too far from any walkable street.');
-  return { address, start, proj, net, houses, z, houseZ, startNode: snap.id, radius: osm.radius, downloaded, fallback };
+  return { center: { lat: center.lat, lon: center.lon }, proj, net, houses, z, houseZ, radius: osm.radius, downloaded, fallback };
 }
 
-// One load per address, shared by background prefetches and plans. A longer plan than the
-// area was sized for widens it.
-let areaJob = null; // { address, promise, done }
-async function areaFor(address, budgetMin) {
-  if (areaJob?.address !== address) {
-    const job = { address, done: false };
-    job.promise = loadArea(address, budgetMin).finally(() => { job.done = true; });
-    areaJob = job;
+// One load per neighborhood, shared by background prefetches, choosing and plans. quick: just
+// the first download (enough to show the houses); otherwise widen until a plan this long fits.
+let areaJob = null; // { center, promise, done }
+function newJob(center, load) {
+  const job = { center, done: false };
+  job.promise = load().finally(() => { job.done = true; });
+  return (areaJob = job);
+}
+async function areaFor(pt, budgetMin, { quick = false } = {}) {
+  if (covers(area, pt) && (quick || enough(area, budgetMin))) return area;
+  let job = covers(areaJob, pt) ? areaJob : newJob(pt, () => loadArea(pt, budgetMin, 0, quick ? RADII[0] : Infinity));
+  for (;;) {
+    let a;
+    try { a = await job.promise; } catch (e) { if (areaJob === job) areaJob = null; throw e; }
+    if (quick || enough(a, budgetMin)) return a;
+    job = areaJob !== job && covers(areaJob, pt) ? areaJob : newJob(a.center, () => loadArea(a.center, budgetMin, a.radius));
   }
-  const job = areaJob;
-  let a;
-  try { a = await job.promise; } catch (e) { if (areaJob === job) areaJob = null; throw e; }
-  if (a.houses.length < housesWanted(budgetMin) && a.radius < RADII.at(-1) && !a.fallback && areaJob === job) {
-    const wider = { address, done: false };
-    wider.promise = loadArea(address, budgetMin, a.radius).finally(() => { wider.done = true; });
-    areaJob = wider;
-    return wider.promise;
-  }
-  return a;
 }
 
-// Start loading in the background so the first plan has less to wait for.
+// Start loading a typed address in the background so its first plan has less to wait for.
 function prefetch() {
   const address = $('address').value.trim();
-  if (address) areaFor(address, +$('budget').value).catch(() => { /* the real plan will retry and report */ });
+  if (!address || address === start?.label) return;
+  geocode(address).then((g) => areaFor(g, +$('budget').value)).catch(() => { /* the real plan will retry and report */ });
 }
 
 async function run() {
   const address = $('address').value.trim();
+  if (!address) return;
   const budgetMin = +$('budget').value;
-  $('go').disabled = true;
-  // Already loaded, or a background prefetch finished? Then there's nothing to wait for but the
+  const picked = start?.label === address ? start : null; // otherwise they typed somewhere new
+  $('go').disabled = $('planHere').disabled = true;
+  // Already loaded, or a background load finished? Then there's nothing to wait for but the
   // solver, and the celebration can be quick.
-  const loaded = area?.address === address && area.houses.length >= housesWanted(budgetMin);
-  const ready = loaded || (areaJob?.address === address && areaJob.done);
-  // A settings tweak on a loaded place re-plans with the map in view; anything else gets the full show.
-  const quiet = loaded && !!shown;
+  const loaded = !!picked && covers(area, picked) && enough(area, budgetMin);
+  const ready = loaded || (!!picked && covers(areaJob, picked) && areaJob.done);
+  // A settings tweak or a dragged start re-plans with the map in view; anything else gets the full show.
+  const quiet = loaded && phase === 'plan';
   progressBase = ready ? 0 : 0.42;
   if (!quiet) {
     loader.show();
     document.activeElement?.blur(); // drop the phone keyboard
   }
   try {
-    const next = loaded ? area : await areaFor(address, budgetMin);
-    if (next !== area) { area = next; fitNext = true; }
+    let s = picked;
+    if (!s) {
+      status('Finding address…');
+      loader.stage('Finding address…', 0.05);
+      const g = await geocode(address);
+      s = { lat: g.lat, lon: g.lon, label: address };
+      setStart(s);
+    }
+    const next = await areaFor(s, budgetMin);
+    fitNext ||= next !== area || phase !== 'plan';
+    useArea(next);
+    const snap = area.net.anchor(...area.proj.toXY(s.lat, s.lon), 400);
+    if (!snap) throw new Error('That spot is too far from any walkable street.');
+    area.startNode = snap.id;
+    if (!area.houses.length) throw new Error(NO_HOUSES);
     await solveAndDraw(budgetMin, { quiet, quick: ready || !area.downloaded });
   } catch (e) {
     console.error(e);
     status(e.message, true);
     loader.hide();
   } finally {
-    $('go').disabled = false;
+    $('go').disabled = $('planHere').disabled = false;
   }
 }
 
@@ -340,6 +654,7 @@ async function solveAndDraw(budgetMin, { quiet = !!shown, quick = true } = {}) {
   if (seq !== solveSeq) return;
   if (!res.ok) throw new Error(res.error);
   shown = { g, routes: res.routes, budgetMin };
+  if (phase !== 'plan') leavePick();
   focus = Math.min(focus, res.routes.length - 1);
   progressBase = 0;
   if (!quiet) {
@@ -374,7 +689,11 @@ function buildHouses() {
   layers.houses.clearLayers();
   housePolys = area.houses.map((h, i) => L.polygon(h.outline, { weight: 1 })
     .bindTooltip(() => houseTip(h, i), { sticky: true })
-    .on('click', () => toggleHouse(h, i))
+    .on('click', (e) => {
+      L.DomEvent.stopPropagation(e);
+      if (phase === 'plan') toggleHouse(h, i);
+      else if (phase === 'pick') pickHouse(i);
+    })
     .addTo(layers.houses));
   housesFor = area;
 }
@@ -382,6 +701,7 @@ function buildHouses() {
 function houseTip(h, i) {
   const ov = overrides[h.id];
   const tag = ov === 'star' ? ' ⭐' : ov === 'dark' ? ' 🌑' : '';
+  if (!shown) return `<b>${esc(h.address || 'House')}${tag}</b><br>Tap to start here`;
   const stops = shown.routes.map((r, ri) => stopOrder[ri]?.get(i) && `Stop ${stopOrder[ri].get(i)} on ${r.label}`).filter(Boolean);
   return `<b>${h.address || 'House'}${tag}</b>${stops.map((t) => `<br>${t}`).join('')}`;
 }
@@ -390,9 +710,10 @@ function houseTip(h, i) {
 function styleHouse(h, i) {
   const ov = overrides[h.id] || 'normal';
   const mine = stopOrder[focus]?.get(i);
-  const other = shown.routes.length > 1 ? stopOrder[1 - focus]?.get(i) : undefined;
+  const other = shown?.routes.length > 1 ? stopOrder[1 - focus]?.get(i) : undefined;
   let fill = '#5b536c', opacity = 0.35;
-  if (ov === 'dark') { fill = '#3a3448'; opacity = 0.9; }
+  if (phase !== 'plan' && h.id === start?.house) { fill = '#ffd36b'; opacity = 0.9; }
+  else if (ov === 'dark') { fill = '#3a3448'; opacity = 0.9; }
   else if (ov === 'star') { fill = '#f5c542'; opacity = 0.9; }
   else if (mine) { fill = ROUTE_COLORS[focus]; opacity = 0.9; }
   else if (other) { fill = ROUTE_COLORS[1 - focus]; opacity = 0.45; }
@@ -416,7 +737,6 @@ function toggleHouse(h, i) {
 
 function draw({ reveal = false, tween = false } = {}) {
   const { g, routes, budgetMin } = shown;
-  const { start } = area;
   const geo = routes.map((r) => geometry(g, r));
   const color = (i) => ROUTE_COLORS[i];
   stopOrder = routes.map((r) => new Map(r.stops.map((idx, i) => [idx, i + 1])));
@@ -469,8 +789,10 @@ function draw({ reveal = false, tween = false } = {}) {
   const showTurns = (n = Infinity) => { for (const t of turns) if (!t.done && t.j < n) { t.done = true; t.mark.addTo(layers.arrows); } };
   const home = L.marker([start.lat, start.lon], {
     icon: L.divIcon({ className: 'home-icon', html: HOME_SVG, iconSize: [32, 32], iconAnchor: [16, 16] }),
-    zIndexOffset: 1000,
-  }).bindTooltip(`Start & finish: ${start.label}`);
+    zIndexOffset: 1000, draggable: true, keyboard: false,
+  }).bindTooltip(`Start & finish: ${esc(start.label)}<br><small>Drag to move it</small>`);
+  dragPreview(home);
+  home.on('dragend', (e) => pickSpot(e.target.getLatLng(), { replan: true }));
   const arrive = (celebrate) => home.getElement()?.classList.add('arrived', ...(celebrate ? ['arriving'] : []));
   if (reveal && !reduced.matches) {
     // Porch lights: each stop on the followed route waits dark until the line reaches it.
@@ -627,6 +949,9 @@ function renderDirections(g, route, geo) {
   });
 }
 
-// Start from a shared link if there is one; otherwise try "here", falling back to the default address.
+// Start from a shared link if there is one; then wherever they last started; otherwise find them
+// (falling back to the default address).
+const saved = (() => { try { return JSON.parse(localStorage.getItem(START_KEY)); } catch { return null; } })();
 if (readUrl()) run();
+else if (saved?.label && Number.isFinite(saved.lat) && Number.isFinite(saved.lon)) chooseStart(saved);
 else useMyLocation(true);

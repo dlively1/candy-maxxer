@@ -58,14 +58,26 @@ export function buildNetwork(ways, proj) {
   const grid = new Grid(50);
   for (let i = 0; i < x.length; i++) grid.add(i, x[i], y[i]);
   const n = x.length;
-  const { comp, main } = components(n, edges);
-  // Only snap onto the main connected network: OSM often has stray fragments (a highway ramp,
-  // a lone footpath) that would strand a route there.
-  const walkable = (node) => comp[node] === main;
-  return { n, lat, lon, x, y, edges, names, nameIdx, nodeNames, grid, walkable, levels };
+  const { comp, size, main } = components(n, edges);
+  // Routes stay on one connected network: OSM often has stray fragments (a highway ramp, a lone
+  // footpath) that would strand a route there. The largest one until anchor() picks the start's.
+  let home = main;
+  const walkable = (node) => comp[node] === home;
+  // Start on the network around (x0, y0): the nearest street point whose network is a real one,
+  // at least a quarter the size of the biggest within reach. A private driveway stub can't strand
+  // the route, but a subdivision that only meets the rest across a no-walking highway still works.
+  // Returns { id, dist } (and makes that network the walkable one) or null.
+  const anchor = (x0, y0, maxDist = 400) => {
+    let big = 0;
+    grid.within(x0, y0, maxDist, (id) => { big = Math.max(big, size[comp[id]]); });
+    const snap = big ? grid.nearest(x0, y0, maxDist, (id) => size[comp[id]] * 4 >= big) : null;
+    if (snap) home = comp[snap.id];
+    return snap;
+  };
+  return { n, lat, lon, x, y, edges, names, nameIdx, nodeNames, grid, walkable, anchor, levels };
 }
 
-// Union-find over the undirected edges; returns each node's component and the largest one.
+// Union-find over the undirected edges; returns each node's component, sizes by component, and the largest.
 function components(n, edges) {
   const parent = Int32Array.from({ length: n }, (_, i) => i);
   const find = (a) => { while (parent[a] !== a) a = parent[a] = parent[parent[a]]; return a; };
@@ -73,11 +85,11 @@ function components(n, edges) {
     const a = find(edges[i]), b = find(edges[i + 1]);
     if (a !== b) parent[a] = b;
   }
-  const comp = new Int32Array(n), size = new Map();
-  for (let i = 0; i < n; i++) { comp[i] = find(i); size.set(comp[i], (size.get(comp[i]) || 0) + 1); }
+  const comp = new Int32Array(n), size = new Int32Array(n);
+  for (let i = 0; i < n; i++) { comp[i] = find(i); size[comp[i]]++; }
   let main = -1, best = -1;
-  for (const [c, k] of size) if (k > best) { best = k; main = c; }
-  return { comp, main };
+  for (let c = 0; c < n; c++) if (size[c] > best) { best = size[c]; main = c; }
+  return { comp, size, main };
 }
 
 // Bridges and tunnels: replace the sampled ground elevation along each with a straight ramp
