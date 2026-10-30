@@ -52,7 +52,6 @@
         <figcaption>Elevation along route</figcaption>
         <div id="profile"></div>
       </figure>
-      <button id="share" type="button" class="secondary">🔗 Share this route</button>
       <h2 id="dirTitle">Directions</h2>
       <ol id="directions"></ol>
     </section>
@@ -65,6 +64,12 @@
   </aside>
   <main id="stage">
     <div id="map"></div>
+    <button id="share" type="button" hidden>
+      <span class="sp-pumpkin" aria-hidden="true">🎃</span>
+      <span class="sp-text"><span class="label" data-label>Share route</span>
+        <svg class="sp-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M7.5 7.5 12 3l4.5 4.5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg></span>
+    </button>
+    <div id="share-hint" role="status" hidden><span class="sh-ghost" aria-hidden="true">👻</span><span class="sh-bubble">Psst… send this to your crew! 👻</span></div>
     <div id="loader" hidden></div>
   </main>
 

@@ -12,6 +12,7 @@ import { arrowLayer } from './arrows.js';
 import { buildSteps, stepText } from './directions.js';
 import { createLoader } from './loader.js';
 import { shareLink } from './share.js';
+import { initPill } from './pill.js';
 
 const $ = (id) => document.getElementById(id);
 const M_PER_MI = 1609.344, FT_PER_M = 3.28084;
@@ -57,6 +58,7 @@ for (const [inp, out, fmt] of [['budget', 'budgetOut', (v) => `${v} min`], ['por
 for (const id of ['budget', 'pace', 'porch', 'alt']) $(id).addEventListener('change', () => area && run());
 $('form').addEventListener('submit', (e) => { e.preventDefault(); run(); });
 $('share').addEventListener('click', share);
+const pill = initPill(map, $('share'));
 
 // Shareable links: ?address=…&min=90&walker=kid&door=30&compare=easy
 const PARAMS = { address: 'address', min: 'budget', walker: 'pace', door: 'porch', compare: 'alt' };
@@ -228,8 +230,8 @@ function draw({ reveal = false } = {}) {
     map.fitBounds(L.latLngBounds(geo.flatMap((x) => x.pts)), { padding: [30, 30], maxZoom: 17, animate: false });
   }
   const arrows = () => arrowLayer(map, geo[focus].pts, color(focus), { pop: true }).addTo(layers.arrows);
-  if (reveal && !matchMedia('(prefers-reduced-motion: reduce)').matches) drawIn(lines, arrows);
-  else arrows();
+  if (reveal && !matchMedia('(prefers-reduced-motion: reduce)').matches) drawIn(lines, () => { arrows(); pill.nudge(); });
+  else { arrows(); if (reveal) pill.nudge(); }
   L.marker([start.lat, start.lon], {
     icon: L.divIcon({ className: 'home-icon', html: '🏠', iconSize: [28, 28], iconAnchor: [14, 14] }),
   }).bindTooltip(`Start & finish: ${start.label}`).addTo(layers.route);

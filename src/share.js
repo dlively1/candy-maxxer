@@ -68,14 +68,17 @@ function showManual(url) {
 
 function celebrate(button, label, [title, sub]) {
   if (button) {
-    const old = button.dataset.label || button.textContent;
-    button.dataset.label = old;
+    // Buttons with structure (the share pill) keep their icons: only the [data-label] span changes.
+    const text = button.querySelector('[data-label]') || button;
+    const old = button._old ?? text.textContent;
+    button._old = old;
     button.classList.remove('sparkle');
     void button.offsetWidth; // restart the CSS animation
     button.classList.add('done', 'sparkle');
-    button.textContent = `👻 ${label}`;
+    setTimeout(() => button.classList.remove('sparkle'), 600); // let other animations (the pill's glow) resume
+    text.textContent = `👻 ${label}`;
     clearTimeout(button._reset);
-    button._reset = setTimeout(() => { button.classList.remove('done'); button.textContent = old; }, 2200);
+    button._reset = setTimeout(() => { button.classList.remove('done'); text.textContent = old; button._old = null; }, 2200);
     burst(button);
     riseGhost(button);
   }
