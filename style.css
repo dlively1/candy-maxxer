@@ -98,7 +98,7 @@ button:disabled { opacity: .5; cursor: progress; }
 }
 
 .toast {
-  position: fixed; left: 50%; bottom: 24px; z-index: 2000; transform: translate(-50%, 160%);
+  position: fixed; left: 50%; bottom: calc(var(--sheet-vis, 0px) + 24px); z-index: 2000; transform: translate(-50%, 160%);
   display: flex; align-items: center; gap: 12px; width: max-content; max-width: min(92vw, 420px);
   background: linear-gradient(180deg, #2a1840, #170f24); color: var(--ink);
   border: 1px solid #8cff6b66; border-radius: 16px; padding: 16px 18px 14px;
@@ -156,7 +156,7 @@ button:disabled { opacity: .5; cursor: progress; }
 .legend { display: flex; gap: 14px; font-size: 12px; color: var(--ink-2); margin-bottom: 2px; }
 .legend span { display: flex; align-items: center; gap: 6px; }
 .plot { position: relative; }
-.plot svg { display: block; width: 100%; height: 116px; }
+.plot svg { display: block; width: 100%; height: 116px; touch-action: pan-y; /* scrub sideways, scroll up and down */ }
 .ylab, .xlab { position: absolute; font-size: 10px; color: var(--ink-3); pointer-events: none; }
 .ylab { left: 0; transform: translateY(-50%); }
 .xlab { bottom: 0; }
@@ -182,8 +182,9 @@ button:disabled { opacity: .5; cursor: progress; }
 #dirBox::details-content { height: 0; overflow: clip; transition: height .35s ease, content-visibility .35s allow-discrete; }
 #dirBox[open]::details-content { height: auto; }
 #directions { margin: 0; padding: 0 12px 12px 34px; display: flex; flex-direction: column; gap: 4px; }
-#directions li { color: var(--ink); cursor: default; border-radius: 4px; padding: 1px 4px; }
+#directions li { color: var(--ink); cursor: pointer; border-radius: 4px; padding: 1px 4px; transition: background .15s; }
 #directions li:hover { background: var(--bg); }
+#directions li.on { background: #2e2245; }
 #directions li small { color: var(--ink-3); }
 
 footer { margin-top: auto; color: var(--ink-3); font-size: 12px; }
@@ -195,9 +196,85 @@ footer a { color: var(--ink-2); }
 .route-arrow svg { display: block; width: 20px; height: 20px; filter: drop-shadow(0 0 2px #000); }
 .home-icon { font-size: 26px; line-height: 1; text-shadow: 0 0 4px #000; }
 
+/* Quick re-plans: the map stays put, the numbers dim, a pumpkin spins up top. */
+#replan {
+  position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 50%; z-index: 600; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; padding: 7px 14px 7px 10px; border-radius: 20px;
+  background: #1d1630e6; border: 1px solid var(--line); box-shadow: 0 6px 20px #0008; backdrop-filter: blur(6px);
+  font-size: 14px; white-space: nowrap; pointer-events: none; animation: drop .2s ease-out;
+}
+#replan[hidden] { display: none; }
+.rp-pumpkin { display: inline-block; font-size: 18px; animation: seek .9s cubic-bezier(.5, 0, .5, 1) infinite; }
+#results, .pk-haul { transition: opacity .2s; }
+body.replanning #results, body.replanning .pk-haul { opacity: .5; }
+.num { transition: color .5s, text-shadow .5s; }
+.num.bump { color: var(--gold); text-shadow: 0 0 10px #f5c54299; transition: none; }
+
+/* A house marked ⭐ / 🌑 / back to normal pops its badge before the re-plan lands. */
+.mark-icon { pointer-events: none; }
+.mark-pop { display: block; font-size: 24px; line-height: 30px; text-align: center; filter: drop-shadow(0 0 6px #000);
+  animation: mark-pop 1s cubic-bezier(.3, 1.6, .5, 1) forwards; }
+@keyframes mark-pop {
+  0% { transform: scale(.2); opacity: 0; } 30% { transform: scale(1.35); opacity: 1; }
+  70% { transform: translateY(-6px); opacity: 1; } 100% { transform: translateY(-24px) scale(.9); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .rp-pumpkin, .mark-pop, #replan { animation: none; } }
+
+/* Bottom-sheet pieces: only on phones. */
+#grab, #peek, .adjust { display: none; }
+.adjust { margin: 0; }
+.pk-haul { display: flex; align-items: baseline; gap: 8px; }
+.pk-candy { font: 400 34px/1 var(--spooky); letter-spacing: .03em; color: var(--orange); text-shadow: 0 2px 0 #7a2f00, 0 0 18px #fb8a2e55; }
+.pk-unit { color: var(--ink-2); font-size: 16px; }
+.pk-stats { margin-top: 4px; color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; }
+.pk-routes { display: flex; gap: 8px; margin-top: 10px; }
+.route-chip {
+  flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 8px;
+  background: transparent; color: var(--ink-2); border: 1px solid var(--line); border-radius: 20px; font-size: 13px;
+  white-space: nowrap; overflow: hidden; transition: background .2s, color .2s, border-color .2s;
+}
+.route-chip.active { background: var(--bg); color: var(--ink); border-color: var(--ink-3); }
+.route-chip i { display: inline-block; width: 12px; height: 4px; border-radius: 2px; flex: none; }
+
 @media (max-width: 760px) {
-  body { flex-direction: column-reverse; }
-  #panel { width: auto; height: 55%; border-right: 0; border-top: 1px solid var(--line); }
+  html, body { overflow: hidden; }
+  body { display: block; }
+  /* absolute, not fixed: keeps the loader in the root stacking context, above the sheet */
+  #stage { position: absolute; inset: 0; }
+  #panel {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 900; width: auto; height: var(--sheet-h, 90dvh);
+    padding: 0 16px calc(20px + env(safe-area-inset-bottom)); gap: 12px;
+    border: 1px solid var(--line); border-bottom: 0; border-radius: 22px 22px 0 0;
+    box-shadow: 0 -12px 40px #000a; overscroll-behavior: contain; will-change: transform;
+    transition: transform .42s cubic-bezier(.2, .9, .25, 1);
+  }
+  #panel.dragging { transition: none; }
+  #grab {
+    display: block; position: sticky; top: 0; z-index: 5; margin: 0 -16px; padding: 8px 16px 6px;
+    background: var(--panel); border-radius: 22px 22px 0 0; touch-action: none; cursor: grab; user-select: none;
+  }
+  #grab .handle { display: block; width: 40px; height: 5px; margin: 0 auto 8px; border-radius: 3px; background: var(--ink-3); opacity: .7; }
+  body.has-plan #peek { display: block; padding-bottom: 4px; }
+
+  /* Order on a phone: errors, then (with a plan) results before the settings. */
+  #grab { order: 0; }
+  #status { order: 1; }
+  #status:empty, #status:not(.error) { display: none; }
+  h1, .tag { order: 2; }
+  #results { order: 3; }
+  form { order: 4; }
+  footer { order: 5; }
+  body.has-plan h1, body.has-plan .tag { display: none; }
+  body.has-plan .adjust { display: block; }
+
+  /* Thumb-sized controls; 16px text so iOS doesn't zoom on focus. */
+  select, input:not([type=range]) { font-size: 16px; padding: 10px 12px; }
+  input[type=range] { height: 28px; }
+  .route-tab { padding: 9px 8px; }
+
+  #stage #share { bottom: calc(var(--sheet-vis, 0px) + 14px); transition: background .25s, color .25s, transform .2s, bottom .42s cubic-bezier(.2, .9, .25, 1); }
+  #stage #share-hint { bottom: calc(var(--sheet-vis, 0px) + 66px); }
+  .leaflet-top { top: env(safe-area-inset-top); }
 }
 .night-tiles { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6); }
 

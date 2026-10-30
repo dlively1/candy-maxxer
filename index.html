@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Candy Maxxer</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎃</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -14,11 +14,16 @@
 </head>
 <body>
   <aside id="panel">
+    <div id="grab">
+      <span class="handle" aria-hidden="true"></span>
+      <div id="peek"></div>
+    </div>
     <h1>🎃 Candy Maxxer</h1>
     <p class="tag">The most candy per minute.</p>
 
     <form id="form">
-      <div class="field">
+      <h2 class="adjust">Adjust the plan</h2>
+      <div class="field" id="addrField" data-peek>
         <label for="address">Start address</label>
         <div class="bone">
           <svg class="bone-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>
@@ -70,7 +75,7 @@
     </section>
 
     <footer>
-      Tap a route in the table to follow it. Click a house to mark it ⭐ full-size or 🌑 dark porch.
+      Tap a route to follow it, or a step to fly to it. Tap a house to mark it ⭐ full-size or 🌑 dark porch.
       Data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>,
       elevation: AWS Terrain Tiles, address search: Photon &amp; US Census.
     </footer>
@@ -83,6 +88,7 @@
         <svg class="sp-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M7.5 7.5 12 3l4.5 4.5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg></span>
     </button>
     <div id="share-hint" role="status" hidden><span class="sh-ghost" aria-hidden="true">👻</span><span class="sh-bubble">Psst… send this to your crew! 👻</span></div>
+    <div id="replan" role="status" aria-live="polite" hidden><span class="rp-pumpkin" aria-hidden="true">🎃</span> Re-planning…</div>
     <div id="loader" hidden></div>
   </main>
 
