@@ -359,8 +359,9 @@ function pickbar(state = barState, msg = barMsg) {
   if (state === 'loading') { $('pickMsg').innerHTML = '<b>Summoning the neighborhood…</b><small>🦇 Fetching houses & streets</small>'; return; }
   if (state === 'error') { $('pickMsg').innerHTML = `<b>${esc(msg)}</b><small>Try another spot, or type an address.</small>`; return; }
   const tip = !area?.houses.length ? 'No houses are mapped right here 🕸️ Drag the pin to change it.'
-    : hauntsHidden ? 'Zoom in to see the haunted houses 🔍'
-    : 'Tap a haunted house, or drag the pin, to change it.';
+    : hauntsHidden ? 'Zoom in to find your house 🔍'
+    : canHover.matches ? 'Hover the houses to see who’s home 👻 Tap yours, or drag the pin.'
+    : 'Tap your house, or drag the pin, to change it.';
   $('pickMsg').innerHTML = `<b>Start at ${esc(start.label.split(',')[0])}</b><small>${tip}</small>`;
 }
 
@@ -393,11 +394,10 @@ function preview(i) {
   if (i === previewing) return;
   const old = previewing;
   previewing = i;
-  if (old >= 0) { haunts.get(old)?.getElement()?.classList.remove('near'); styleHouse(area.houses[old], old); }
-  if (i >= 0) {
-    haunts.get(i)?.getElement()?.classList.add('near');
-    housePolys[i]?.setStyle({ color: '#ffb347', fillColor: '#ffb347', fillOpacity: 0.55 });
-  }
+  if (old >= 0) styleHouse(area.houses[old], old);
+  if (i >= 0) housePolys[i]?.setStyle({ color: '#ffb347', fillColor: '#ffb347', fillOpacity: 0.55 });
+  if (phase === 'pick') renderHaunts(); // the house under the pin rises
+  else haunts.get(old)?.getElement()?.classList.remove('near');
 }
 function dragPreview(marker) {
   let raf = 0;
@@ -408,41 +408,85 @@ function dragPreview(marker) {
   marker.on('dragend', () => { cancelAnimationFrame(raf); preview(-1); });
 }
 
-// Haunted houses on screen while choosing: zoomed in, and in a dense neighborhood only the ones
-// nearest the middle of the map, so there are never too many to draw smoothly.
-const HAUNT_ZOOM = 16.5, HAUNT_MAX = 220;
-const haunts = new Map(); // house index → marker
+// Haunted houses while choosing: houses stay plain until you go near one, then it rises out of the
+// ground haunted (and sinks back when you move on). The chosen one stays, the one under a dragged
+// pin rises, and now and then a house on screen rises for a moment on its own, so the street feels
+// alive (phones, with no hover, see that too).
+const HAUNT_ZOOM = 15.5;
+const haunts = new Map(); // house index → marker (some sinking away)
+const revealed = { hover: -1, apparitions: new Set() };
 let hauntsFor = null, hauntsHidden = false;
-const haunter = haunting(() => [...haunts.values()]);
+const haunter = haunting(() => [...haunts.values()].filter((m) => !m.sinking));
+
+function wantedHaunts() {
+  const want = new Set();
+  if (phase !== 'pick' || !area || map.getZoom() < HAUNT_ZOOM) return want;
+  const chosen = start?.house == null ? -1 : area.houses.findIndex((h) => h.id === start.house);
+  for (const i of [chosen, revealed.hover, previewing, ...revealed.apparitions]) if (i >= 0) want.add(i);
+  return want;
+}
+
 function renderHaunts() {
-  const on = phase === 'pick' && !!area && map.getZoom() >= HAUNT_ZOOM;
-  let near = [];
-  if (on) {
-    const b = map.getBounds().pad(0.15), c = map.getCenter();
-    area.houses.forEach((h, i) => { if (b.contains([h.lat, h.lon])) near.push([i, (h.lat - c.lat) ** 2 + ((h.lon - c.lng) * 0.77) ** 2]); });
-    if (near.length > HAUNT_MAX) near = near.sort((a, b2) => a[1] - b2[1]).slice(0, HAUNT_MAX);
-  }
-  const want = new Set(near.map(([i]) => i));
-  hauntsHidden = phase === 'pick' && !!area?.houses.length && !on;
-  map.getContainer().style.setProperty('--hz', map.getZoom() >= 18 ? 1 : 0.8); // a touch smaller when they're packed in
-  if (hauntsFor !== area) { layers.haunts.clearLayers(); haunts.clear(); hauntsFor = area; }
-  for (const [i, m] of haunts) if (!want.has(i)) { m.remove(); haunts.delete(i); }
+  if (hauntsFor !== area) { layers.haunts.clearLayers(); haunts.clear(); revealed.apparitions.clear(); revealed.hover = -1; hauntsFor = area; }
+  const want = wantedHaunts();
+  hauntsHidden = phase === 'pick' && !!area?.houses.length && map.getZoom() < HAUNT_ZOOM;
+  map.getContainer().style.setProperty('--hz', map.getZoom() >= 18 ? 1 : 0.85); // a touch smaller when they're packed in
+  for (const [i, m] of haunts) if (!want.has(i) && !m.sinking) sink(i, m);
   for (const i of want) {
-    if (haunts.has(i)) continue;
+    const old = haunts.get(i);
+    if (old?.sinking) { clearTimeout(old.sinking); old.sinking = 0; old.getElement()?.classList.remove('sinking'); }
+    if (old) continue;
     const h = area.houses[i];
-    const m = L.marker([h.lat, h.lon], { icon: hauntIcon(h.id), keyboard: false, riseOnHover: true })
+    const m = L.marker([h.lat, h.lon], { icon: hauntIcon(h.id), keyboard: false })
       .on('click', (e) => { L.DomEvent.stopPropagation(e); pickHouse(i); });
     if (canHover.matches && h.address) m.bindTooltip(esc(h.address), { direction: 'top' }); // on touch it would cover the pin
     haunts.set(i, m.addTo(layers.haunts));
   }
   for (const [i, m] of haunts) {
-    const me = area.houses[i].id === start?.house;
+    const me = area.houses[i].id === start?.house, near = i === revealed.hover || i === previewing;
     m.getElement()?.classList.toggle('chosen', me);
-    m.setZIndexOffset(me ? 500 : 0);
+    m.getElement()?.classList.toggle('near', near && !me && !m.sinking);
+    m.setZIndexOffset(near ? 600 : me ? 500 : 0);
   }
-  if (haunts.size && !reduced.matches) haunter.start(); else haunter.stop();
+  if (phase === 'pick' && !hauntsHidden && !reduced.matches) haunter.start(); else haunter.stop();
   if (phase === 'pick' && barState === 'start') pickbar();
 }
+
+// Back into the ground, then gone (unless it's wanted again first).
+function sink(i, m) {
+  const el = m.getElement();
+  if (!el || reduced.matches) { m.remove(); haunts.delete(i); return; }
+  el.classList.remove('near');
+  el.classList.add('sinking');
+  m.sinking = setTimeout(() => { m.remove(); if (haunts.get(i) === m) haunts.delete(i); }, 420);
+}
+
+// The house nearest the pointer rises (generously: within ~24 px of its middle).
+let hoverRaf = 0;
+map.on('mousemove', (e) => {
+  if (phase !== 'pick' || !area || !canHover.matches) return;
+  if (e.originalEvent.target.closest?.('.haunt')) return; // over a risen house: keep it
+  cancelAnimationFrame(hoverRaf);
+  hoverRaf = requestAnimationFrame(() => {
+    const mPerPx = (40075016 * Math.cos((e.latlng.lat * Math.PI) / 180)) / 2 ** (map.getZoom() + 8);
+    const i = map.getZoom() < HAUNT_ZOOM ? -1 : houseNear({ lat: e.latlng.lat, lon: e.latlng.lng }, 24 * mPerPx);
+    if (i !== revealed.hover) { revealed.hover = i; renderHaunts(); }
+  });
+});
+map.getContainer().addEventListener('mouseleave', () => { if (revealed.hover >= 0) { revealed.hover = -1; renderHaunts(); } });
+
+// Apparitions: every so often a house on screen rises for a moment on its own (a few at most).
+setInterval(() => {
+  if (phase !== 'pick' || !area?.houses.length || reduced.matches || document.hidden || map.getZoom() < HAUNT_ZOOM) return;
+  if (revealed.apparitions.size >= 3) return;
+  const b = map.getBounds().pad(-0.12), pool = [];
+  area.houses.forEach((h, i) => { if (b.contains([h.lat, h.lon]) && !haunts.has(i)) pool.push(i); });
+  const i = pool[Math.floor(Math.random() * pool.length)];
+  if (i === undefined) return;
+  revealed.apparitions.add(i);
+  renderHaunts();
+  setTimeout(() => { revealed.apparitions.delete(i); renderHaunts(); }, 2400 + Math.random() * 1600);
+}, 1300);
 map.on('moveend', renderHaunts);
 map.on('click', (e) => {
   if (phase === 'pick') pickSpot(e.latlng);
@@ -697,7 +741,7 @@ function styleHouse(h, i) {
   const ov = overrides[h.id] || 'normal';
   const mine = stopOrder[focus]?.get(i);
   const other = shown?.routes.length > 1 ? stopOrder[1 - focus]?.get(i) : undefined;
-  let fill = '#5b536c', opacity = 0.35;
+  let fill = '#5b536c', opacity = phase === 'pick' ? 0.5 : 0.35;
   if (phase !== 'plan' && h.id === start?.house) { fill = '#ffb347'; opacity = 0.5; } // a warm wash under its haunted house
   else if (ov === 'dark') { fill = '#3a3448'; opacity = 0.9; }
   else if (ov === 'star') { fill = '#f5c542'; opacity = 0.9; }

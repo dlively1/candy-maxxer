@@ -316,15 +316,22 @@ footer a { color: var(--ink-2); }
 body.replanning .route-flow { opacity: .2; }
 @media (prefers-reduced-motion: reduce) { .uturn-icon span, .home-icon .finish-flag { animation: none !important; } }
 
-/* Choosing a start: haunted houses to tap, a gold pin to drag. Idle, a few windows flicker; on
-   hover the house shudders, its door creaks open and a bat takes off; picked, it blazes, smoke curls
-   from the chimney and a ghost drifts up out of it. */
+/* Choosing a start: go near a house and it rises out of the ground haunted, in a puff of mist; it
+   shudders, its door creaks open, a bat may take off. Move on and it sinks back. Picked, it blazes,
+   smoke curls from the chimney and a ghost drifts up out of it. */
 .haunt { cursor: pointer; }
 .haunt .hb {
   display: block; width: 34px; height: 37px; transform: rotate(var(--tilt)) scale(calc(var(--s) * var(--hz, 1)));
   transform-origin: 50% 92%; transition: transform .3s cubic-bezier(.3, 1.6, .5, 1);
-  animation: haunt-rise .55s cubic-bezier(.3, 1.5, .5, 1) backwards;
+  animation: haunt-rise .6s ease-out backwards;
 }
+.haunt.sinking { pointer-events: none; }
+.haunt.sinking .hb { animation: haunt-sink .42s cubic-bezier(.5, 0, .8, .4) forwards; }
+.haunt .mist { /* rising or sinking, the house stirs up a little ground mist */
+  position: absolute; left: 50%; bottom: -4px; width: 50px; height: 16px; margin-left: -25px; border-radius: 50%;
+  background: radial-gradient(closest-side, #cdbcf5aa, #cdbcf500); opacity: 0; pointer-events: none; animation: mist-puff .9s ease-out;
+}
+.haunt.sinking .mist { animation: mist-puff-out .5s ease-out; }
 .haunt svg { display: block; width: 34px; height: 37px; overflow: visible; transform-origin: 50% 92%; }
 .haunt .hl { stroke: #4f4072; stroke-width: .85; stroke-linejoin: round; }
 .haunt .wall { fill: url(#hh-wall); }
@@ -370,7 +377,17 @@ body.replanning .route-flow { opacity: .2; }
   opacity: 0; pointer-events: none; filter: drop-shadow(0 0 4px #dff6ffaa);
 }
 .haunt.just .hb::before { animation: ghost-up 1.7s ease-out .15s; }
-@keyframes haunt-rise { from { opacity: 0; transform: rotate(var(--tilt)) translateY(8px) scale(calc(var(--s) * var(--hz, 1) * .4)); } }
+@keyframes haunt-rise {
+  0% { opacity: 0; transform: rotate(var(--tilt)) scale(calc(var(--s) * var(--hz, 1) * .8), 0); }
+  55% { opacity: 1; transform: rotate(var(--tilt)) scale(calc(var(--s) * var(--hz, 1) * .94), calc(var(--s) * var(--hz, 1) * 1.2)); }
+  80% { transform: rotate(var(--tilt)) scale(calc(var(--s) * var(--hz, 1) * 1.05), calc(var(--s) * var(--hz, 1) * .94)); }
+}
+@keyframes haunt-sink {
+  25% { transform: rotate(var(--tilt)) scale(calc(var(--s) * var(--hz, 1) * 1.05), calc(var(--s) * var(--hz, 1) * 1.08)); }
+  100% { opacity: 0; transform: rotate(var(--tilt)) scale(calc(var(--s) * var(--hz, 1) * .85), 0); }
+}
+@keyframes mist-puff { 0% { opacity: 0; transform: scale(.3); } 30% { opacity: 1; } 100% { opacity: 0; transform: translateY(-5px) scale(1.5, 2); } }
+@keyframes mist-puff-out { 0% { opacity: 0; transform: scale(.5); } 40% { opacity: .8; } 100% { opacity: 0; transform: scale(1.4, 1.2); } }
 @keyframes haunt-shudder {
   0%, 100% { transform: none; } 20% { transform: rotate(-3deg) translateX(-.5px); } 40% { transform: rotate(2.5deg); }
   60% { transform: rotate(-1.5deg); } 80% { transform: rotate(1deg); }
@@ -436,7 +453,7 @@ body.replanning .route-flow { opacity: .2; }
 #planHere:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
 @keyframes pickbar-in { from { opacity: 0; transform: translate(-50%, -10px) scale(.96); } }
 @media (prefers-reduced-motion: reduce) {
-  .haunt .hb, .haunt:hover::after, .haunt.just .hb::before, .haunt:hover svg, .haunt.near svg, .haunt.chosen .smoke,
+  .haunt .hb, .haunt .mist, .haunt.sinking .hb, .haunt:hover::after, .haunt.just .hb::before, .haunt:hover svg, .haunt.near svg, .haunt.chosen .smoke,
   .start-pin .pin-b, .start-pin .pin-bob, #pickbar, #planHere::after { animation: none; }
 }
 

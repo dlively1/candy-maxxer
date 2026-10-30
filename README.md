@@ -5,8 +5,9 @@ and gets you home — with hills priced in.
 
 ## How it works
 
-1. **Start** — "find me" (browser geolocation) flies the map to you and lights up the haunted houses
-   around you: tap yours or drag the gold pin (it snaps to a house, else the street). Or pick a
+1. **Start** — "find me" (browser geolocation) flies the map to you; go near a house and it rises out of
+   the ground as a haunted house (now and then one rises on its own). Tap yours or drag the gold pin (it
+   snaps to a house, else the street). Or pick a
    type-ahead suggestion (houses already on the map first, then Photon, kept within ~30 km of what's on
    screen unless you type a town), or type an address (US Census geocoder via JSONP, Nominatim fallback).
    The chosen start is kept as is and remembered, so GPS jitter never moves it; drag the 🏠 on a plan to

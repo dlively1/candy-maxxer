@@ -1,4 +1,5 @@
-// Haunted houses to pick a start from. Four crooked silhouettes (a towered Victorian drawn either
+// Haunted houses to pick a start from: a house rises out of the ground haunted (in a puff of mist)
+// as you go near it, and sinks back when you move on. Four crooked silhouettes (a towered Victorian drawn either
 // way round, a gothic gable, a sagging cottage), with glowing arched windows, boarded-up panes, a
 // door that swings open on hover, and smoke for the chosen one. Every house gets its own steady
 // "random" look, tilt and size, so a street reads as a row of mismatched old places.
@@ -100,7 +101,7 @@ export function hauntHtml(id) {
   const style = `--tilt:${((r(1) - 0.5) * 8).toFixed(1)}deg;--s:${s.toFixed(2)};`
     + `--gx:${f(cx * SCALE)}px;--gy:${f(cy * SCALE)}px;--gd:${cx < 20 ? -1 : 1}`; // the ghost drifts away from the pin, chimney side
   // Smoke last, so it never hides behind a roof.
-  return `<span class="hb" style="${style}"><svg viewBox="0 0 40 44" aria-hidden="true">${v.body}${smoke(cx, cy)}</svg></span>`;
+  return `<span class="mist"></span><span class="hb" style="${style}"><svg viewBox="0 0 40 44" aria-hidden="true">${v.body}${smoke(cx, cy)}</svg></span>`;
 }
 
 export function hauntIcon(id, extra = '') {
