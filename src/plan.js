@@ -30,19 +30,33 @@ const finish = (g, startNode, key, label, r) => {
   return { key, label, stops: r.stops, totalSec, candy: r.candy, considered: r.considered, legs, distM, climbM };
 };
 
-export function plan({ g, houses, startNode, budgetSec, alt }) {
-  const maxRun = solve({ g, houses, startNode, budgetSec });
-  if (!ALTERNATIVES[alt]) return [finish(g, startNode, 'max', 'Max Candy', maxRun)];
+// onProgress({ phase, frac, candy }): overall progress 0..1 and the best Max Candy haul so far.
+export function plan({ g, houses, startNode, budgetSec, alt, onProgress = () => {} }) {
+  const single = !ALTERNATIVES[alt];
+  let best = 0;
+  const phase = (name, from, to) => ({ t, candy }) => {
+    if (name === 'max') best = Math.max(best, candy);
+    onProgress({ phase: name, frac: from + (to - from) * t, candy: best });
+  };
+  const maxRun = solve({ g, houses, startNode, budgetSec, onProgress: phase('max', 0.05, single ? 0.9 : 0.45) });
+  if (single) return done([finish(g, startNode, 'max', 'Max Candy', maxRun)]);
+  const altPhase = phase('alt', 0.45, 0.9);
   let b = alternative(maxRun);
   // The search is heuristic: if an alternative with the same time budget found more candy,
   // it is the real Max Candy route — promote it and plan the alternative again from there.
   if (alt !== 'more' && b.candy > maxRun.candy + 0.5) {
     const promoted = b.stops.map((h) => houses.find((x) => x.index === h.index));
     const r = { ...b, stops: promoted, scoreSec: null };
+    best = r.candy;
     b = alternative(r);
-    return pair(r, b);
+    return done(pair(r, b));
   }
-  return pair(maxRun, b);
+  return done(pair(maxRun, b));
+
+  function done(routes) {
+    onProgress({ phase: 'done', frac: 1, candy: routes[0].candy });
+    return routes;
+  }
 
   function pair(ra, rb) {
     const a = finish(g, startNode, 'max', 'Max Candy', ra);
@@ -56,12 +70,15 @@ export function plan({ g, houses, startNode, budgetSec, alt }) {
   }
 
   function alternative(a) {
-    return alt === 'easy' ? easier(a) : alt === 'fresh' ? fresh(a) : solve({ g, houses, startNode, budgetSec: budgetSec + 30 * 60 });
+    return alt === 'easy' ? easier(a) : alt === 'fresh' ? fresh(a)
+      : solve({ g, houses, startNode, budgetSec: budgetSec + 30 * 60, onProgress: altPhase });
   }
 
   function easier(a) {
     const prep = prepare({ g, houses, startNode, budgetSec, secPerMeter: EASY_SEC_PER_M });
-    const tries = EASY_CANDY_PER_M.map((c) => optimize(prep, c, { timeMs: 300 }));
+    const tries = EASY_CANDY_PER_M.map((c, i) => optimize(prep, c, {
+      timeMs: 300, onProgress: ({ t }) => altPhase({ t: (i + t) / EASY_CANDY_PER_M.length, candy: 0 }),
+    }));
     const ok = tries.filter((t) => t.candy >= EASY_MIN_SHARE * a.candy);
     return (ok.length ? ok : tries).reduce((x, y) => ((ok.length ? y.climbM < x.climbM : y.candy > x.candy) ? y : x));
   }
@@ -69,7 +86,7 @@ export function plan({ g, houses, startNode, budgetSec, alt }) {
   function fresh(a) {
     const seen = new Set(a.stops.map((h) => h.index));
     const hs = houses.map((h) => (seen.has(h.index) ? { ...h, value: h.value * REPEAT_DISCOUNT, candy: h.value } : h));
-    return solve({ g, houses: hs, startNode, budgetSec });
+    return solve({ g, houses: hs, startNode, budgetSec, onProgress: (p) => altPhase({ ...p, candy: 0 }) });
   }
 }
 

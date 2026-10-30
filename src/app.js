@@ -10,6 +10,7 @@ import { PACES } from './tobler.js';
 import { renderProfile } from './profile.js';
 import { arrowLayer } from './arrows.js';
 import { buildSteps, stepText } from './directions.js';
+import { createLoader } from './loader.js';
 
 const $ = (id) => document.getElementById(id);
 const M_PER_MI = 1609.344, FT_PER_M = 3.28084;
@@ -30,8 +31,17 @@ const layers = {
 };
 
 const worker = new Worker(new URL('./solver.worker.js', import.meta.url), { type: 'module' });
+const loader = createLoader($('loader'));
 const pending = new Map();
-worker.onmessage = ({ data }) => { pending.get(data.seq)?.(data); pending.delete(data.seq); };
+let progressBase = 0; // share of the loader bar already used by downloads before planning
+worker.onmessage = ({ data }) => {
+  if (data.progress) {
+    if (data.seq === solveSeq) loader.progress(progressBase + data.progress.frac * (1 - progressBase), data.progress.candy);
+    return;
+  }
+  pending.get(data.seq)?.(data);
+  pending.delete(data.seq);
+};
 const overrides = JSON.parse(localStorage.getItem('cm:overrides') || '{}');
 
 let area = null;     // loaded neighborhood: { address, start, proj, net, houses, z, houseZ, startNode }
@@ -87,6 +97,7 @@ function flash(msg) {
 function status(msg, isError = false) {
   $('status').textContent = msg;
   $('status').classList.toggle('error', isError);
+  if (!isError) loader.stage(msg);
 }
 
 // One fetch per address. At ~1 min per house, 1 km holds far more houses than even 3 hours can visit.
@@ -94,13 +105,16 @@ const RADIUS_M = 1000;
 
 async function loadArea(address) {
   status('Finding address…');
+  loader.stage('Finding address…', 0.05);
   const start = await geocode(address);
+  loader.stage('Fetching houses & streets…', 0.3);
   const osm = await fetchOsm(start.lat, start.lon, RADIUS_M, status);
   const proj = makeProjection(start.lat, start.lon);
   const { ways, houses } = parseOsm(osm, proj);
   if (!ways.length) throw new Error('No walkable streets found near that address.');
   const net = buildNetwork(ways, proj);
   status(`Measuring hills under ${net.n.toLocaleString()} street points…`);
+  loader.stage(`Measuring hills under ${net.n.toLocaleString()} street points…`, 0.4);
   const all = await elevations([...net.lat.map((la, i) => [la, net.lon[i]]), ...houses.map((h) => [h.lat, h.lon])]);
   const z = all.subarray(0, net.n), houseZ = all.subarray(net.n);
   const snap = net.grid.nearest(0, 0, 400);
@@ -112,15 +126,19 @@ async function run() {
   const address = $('address').value.trim();
   const budgetMin = +$('budget').value;
   $('go').disabled = true;
+  loader.show();
+  progressBase = 0;
   try {
     if (!area || area.address !== address) {
       area = await loadArea(address);
       fitNext = true;
+      progressBase = 0.42;
     }
     await solveAndDraw(budgetMin);
   } catch (e) {
     console.error(e);
     status(e.message, true);
+    loader.hide();
   } finally {
     $('go').disabled = false;
   }
@@ -134,6 +152,7 @@ async function solveAndDraw(budgetMin) {
   const hs = attachHouses(net, houses, houseZ, z, { pace, porchSec });
   for (const h of hs) h.value = candyValue(h, overrides[h.id]);
 
+  loader.show();
   status($('alt').value === 'none' ? 'Planning the sweetest route…' : 'Planning two routes to compare…');
   const seq = ++solveSeq;
   const res = await new Promise((resolve) => {
@@ -147,8 +166,11 @@ async function solveAndDraw(budgetMin) {
   if (!res.ok) throw new Error(res.error);
   shown = { g, routes: res.routes, budgetMin };
   focus = Math.min(focus, res.routes.length - 1);
-  draw();
-  status(`Checked ${res.routes[0].considered} reachable houses in ${(res.ms / 1000).toFixed(1)} s.`);
+  progressBase = 0;
+  await loader.finish(res.routes[0].candy);
+  if (seq !== solveSeq) return;
+  draw({ reveal: true });
+  status(`Weighed up ${res.routes[0].considered} nearby houses in ${(res.ms / 1000).toFixed(1)} s.`);
   history.replaceState(null, '', linkUrl());
 }
 
@@ -167,7 +189,7 @@ function geometry(g, route) {
   return { pts, prof };
 }
 
-function draw() {
+function draw({ reveal = false } = {}) {
   const { g, routes, budgetMin } = shown;
   const { houses, start } = area;
   const geo = routes.map((r) => geometry(g, r));
@@ -193,7 +215,7 @@ function draw() {
       const next = OVERRIDES[(OVERRIDES.indexOf(ov) + 1) % OVERRIDES.length];
       if (next === 'normal') delete overrides[h.id]; else overrides[h.id] = next;
       localStorage.setItem('cm:overrides', JSON.stringify(overrides));
-      solveAndDraw(budgetMin).catch((e) => status(e.message, true));
+      solveAndDraw(budgetMin).catch((e) => { status(e.message, true); loader.hide(); });
     });
     poly.addTo(layers.houses);
   });
@@ -202,18 +224,21 @@ function draw() {
   layers.route.clearLayers();
   layers.arrows.clearLayers();
   const drawOrder = routes.map((_, i) => i).sort((a, b) => (a === focus) - (b === focus));
+  const lines = [];
   for (const i of drawOrder) {
     const on = i === focus;
-    if (on) L.polyline(geo[i].pts, { color: '#000', weight: 8, opacity: 0.45, interactive: false }).addTo(layers.route);
-    L.polyline(geo[i].pts, {
+    if (on) lines.push(L.polyline(geo[i].pts, { color: '#000', weight: 8, opacity: 0.45, interactive: false }).addTo(layers.route));
+    lines.push(L.polyline(geo[i].pts, {
       color: color(i), weight: on ? 4 : 3, opacity: on ? 1 : 0.6, dashArray: on ? null : '6 6',
-    }).on('click', () => setFocus(i)).addTo(layers.route);
+    }).on('click', () => setFocus(i)).addTo(layers.route));
   }
   if (fitNext) {
     fitNext = false;
     map.fitBounds(L.latLngBounds(geo.flatMap((x) => x.pts)), { padding: [30, 30], maxZoom: 17, animate: false });
   }
-  arrowLayer(map, geo[focus].pts, color(focus)).addTo(layers.arrows);
+  const arrows = () => arrowLayer(map, geo[focus].pts, color(focus), { pop: true }).addTo(layers.arrows);
+  if (reveal && !matchMedia('(prefers-reduced-motion: reduce)').matches) drawIn(lines, arrows);
+  else arrows();
   L.marker([start.lat, start.lon], {
     icon: L.divIcon({ className: 'home-icon', html: '🏠', iconSize: [28, 28], iconAnchor: [14, 14] }),
   }).bindTooltip(`Start & finish: ${start.label}`).addTo(layers.route);
@@ -227,6 +252,23 @@ function draw() {
   });
   renderDirections(g, routes[focus], geo[focus]);
   $('results').hidden = false;
+}
+
+// Walk the route onto the map: every line grows from home along its path, then the arrows pop in.
+function drawIn(lines, then) {
+  const full = lines.map((l) => l.getLatLngs().slice());
+  const longest = Math.max(...full.map((f) => f.length));
+  const ms = Math.min(1800, Math.max(700, longest * 3));
+  const t0 = performance.now();
+  const step = (now) => {
+    const t = Math.min(1, (now - t0) / ms);
+    const e = 1 - (1 - t) ** 3; // ease-out
+    lines.forEach((l, i) => l.setLatLngs(full[i].slice(0, Math.max(2, Math.ceil(full[i].length * e)))));
+    if (t < 1) requestAnimationFrame(step);
+    else then();
+  };
+  lines.forEach((l) => l.setLatLngs(full[lines.indexOf(l)].slice(0, 2)));
+  requestAnimationFrame(step);
 }
 
 function setFocus(i) {

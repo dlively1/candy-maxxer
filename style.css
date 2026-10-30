@@ -19,7 +19,8 @@ body { display: flex; }
   background: var(--panel); border-right: 1px solid var(--line);
   display: flex; flex-direction: column; gap: 14px;
 }
-#map { flex: 1; }
+#stage { flex: 1; position: relative; min-height: 0; }
+#map { position: absolute; inset: 0; }
 
 h1 { margin: 0; font-size: 24px; }
 h2 { margin: 6px 0 0; font-size: 14px; color: var(--ink-2); text-transform: uppercase; letter-spacing: .06em; }
@@ -87,6 +88,7 @@ footer a { color: var(--ink-2); }
 
 .leaflet-container { background: var(--bg); }
 .leaflet-tooltip { background: var(--panel); color: var(--ink); border-color: var(--line); }
+.route-arrow span { display: block; }
 .route-arrow svg { display: block; width: 20px; height: 20px; filter: drop-shadow(0 0 2px #000); }
 .home-icon { font-size: 26px; line-height: 1; text-shadow: 0 0 4px #000; }
 

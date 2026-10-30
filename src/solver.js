@@ -12,13 +12,20 @@
 
 import { dijkstra, pathEdges, climbAverse } from './graph.js';
 
-export function solve({ g, houses, startNode, budgetSec, climb = null, timeMs }) {
-  const ctx = prepare({ g, houses, startNode, budgetSec, secPerMeter: climb?.secPerMeter });
-  return optimize(ctx, climb?.candyPerMeter ?? 0, { timeMs });
+export function solve({ g, houses, startNode, budgetSec, climb = null, timeMs, onProgress }) {
+  // Measuring walking times takes roughly the first third of the work.
+  const ctx = prepare({ g, houses, startNode, budgetSec, secPerMeter: climb?.secPerMeter,
+    onProgress: onProgress && ((t) => onProgress({ t: t / 3, candy: 0 })) });
+  return optimize(ctx, climb?.candyPerMeter ?? 0, { timeMs,
+    onProgress: onProgress && ((p) => onProgress({ ...p, t: 1 / 3 + (2 / 3) * p.t })) });
 }
 
+// A route can only use so many houses; past ~5 per minute of budget, extra (farther) candidates
+// only slow the search. Keep the closest ones.
+const candidateCap = (budgetSec) => Math.round(Math.min(1000, Math.max(250, (budgetSec / 60) * 5)));
+
 // Build the point-to-point walking-time matrices once; optimize() can then be run many times.
-export function prepare({ g, houses, startNode, budgetSec, secPerMeter = 0 }) {
+export function prepare({ g, houses, startNode, budgetSec, secPerMeter = 0, onProgress = null }) {
   const scoreSec = secPerMeter ? climbAverse(g, secPerMeter) : null;
   const run = (src) => dijkstra(g, src, { w: scoreSec || g.sec, aux: scoreSec ? g.sec : null });
   const real = (r) => r.aux || r.dist;
@@ -26,8 +33,14 @@ export function prepare({ g, houses, startNode, budgetSec, secPerMeter = 0 }) {
 
   // Candidates: reachable, worth something, and can be visited in a there-and-back trip.
   let cand = houses.filter((h) => h.value > 0 && real(fromStart)[h.node] + h.doorSec <= budgetSec);
+  const cap = candidateCap(budgetSec);
+  if (cand.length > cap) cand = cand.sort((a, b) => real(fromStart)[a.node] - real(fromStart)[b.node]).slice(0, cap);
   const from = new Map([[startNode, fromStart]]);
-  for (const h of cand) if (!from.has(h.node)) from.set(h.node, run(h.node));
+  const sources = [...new Set(cand.map((h) => h.node))];
+  sources.forEach((v, i) => {
+    if (!from.has(v)) from.set(v, run(v));
+    if (onProgress && i % 25 === 0) onProgress(i / sources.length);
+  });
   cand = cand.filter((h) => real(fromStart)[h.node] + h.doorSec + real(from.get(h.node))[startNode] <= budgetSec);
 
   // Point 0 is home; points 1..N-1 are candidate houses.
@@ -49,14 +62,21 @@ export function prepare({ g, houses, startNode, budgetSec, secPerMeter = 0 }) {
 
 // candyPerMeter: how much candy one meter of climbing is "worth" giving up (0 = don't care).
 // Local search runs until `timeMs` has passed or `iterations` perturbations were tried.
-export function optimize(prep, candyPerMeter = 0, { timeMs = 400, iterations = 300 } = {}) {
+// onProgress({ t, candy }) reports search progress (0..1) and the best haul found so far.
+export function optimize(prep, candyPerMeter = 0, { timeMs = 400, iterations = 300, onProgress = null } = {}) {
   const ctx = { ...prep, lambda: prep.secPerMeter ? candyPerMeter / prep.secPerMeter : 0 };
   let best = null;
   for (const alpha of [1, 0.75, 1.25, 1.6]) {
     const r = evaluate(ctx, construct(ctx, alpha));
     if (!best || better(r, best)) best = r;
   }
-  best = iteratedLocalSearch(ctx, best, iterations, performance.now() + timeMs);
+  const t0 = performance.now();
+  const report = onProgress && ((r) => onProgress({
+    t: Math.min(1, (performance.now() - t0) / timeMs),
+    candy: r.route.reduce((s, p) => s + ctx.candy[p], 0),
+  }));
+  report?.(best);
+  best = iteratedLocalSearch(ctx, best, iterations, t0 + timeMs, report);
 
   const { N, D, P, door, candy, cand, scoreSec, secPerMeter } = ctx;
   const route = best.route;
@@ -98,7 +118,7 @@ function construct(ctx, alpha, route = [0, 0]) {
 }
 
 // Perturb: drop a random stretch of stops, rebuild greedily, keep if better.
-function iteratedLocalSearch(ctx, best, iterations, deadline) {
+function iteratedLocalSearch(ctx, best, iterations, deadline, report) {
   let seed = 12345;
   const rand = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
   for (let it = 0; it < iterations && performance.now() < deadline; it++) {
@@ -111,6 +131,7 @@ function iteratedLocalSearch(ctx, best, iterations, deadline) {
     const alpha = [1, 0.75, 1.25, 1.6][it % 4];
     const cand = evaluate(ctx, construct(ctx, alpha, r));
     if (better(cand, best)) best = cand;
+    report?.(best);
   }
   return best;
 }
