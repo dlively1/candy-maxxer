@@ -29,7 +29,7 @@ export function createLoader(root) {
     count: $('.ld-count b'), bar: $('.ld-bar i'), stage: $('.ld-stage'), quip: $('.ld-quip'),
     bucket: $('.ld-bucket'), flyers: $('.ld-flyers'), card: $('.ld-card'), title: $('.ld-title'),
   };
-  let shownAt = 0, target = 0, shownCount = 0, frac = 0, creepTo = 0;
+  let shownAt = 0, target = 0, shownCount = 0, frac = 0, creepTo = 0, landed = 0;
   let raf = 0, quipTimer = 0, idleTimer = 0, quipIdx = Math.floor(Math.random() * QUIPS.length);
   let visible = false;
 
@@ -85,6 +85,10 @@ export function createLoader(root) {
     anim.onfinish = () => {
       c.remove();
       if (!fromBurst) {
+        // Before the solver reports a real haul, let each landing candy tick the counter up
+        // (capped, so it never overshoots a real route by much).
+        landed = Math.min(60, landed + 1);
+        target = Math.max(target, landed);
         el.bucket.classList.remove('wobble');
         void el.bucket.offsetWidth; // restart the CSS animation
         el.bucket.classList.add('wobble');
@@ -97,7 +101,7 @@ export function createLoader(root) {
       if (visible) return;
       visible = true;
       shownAt = performance.now();
-      target = 0; shownCount = 0; frac = 0; creepTo = 0.05;
+      target = 0; shownCount = 0; frac = 0; creepTo = 0.05; landed = 0;
       el.title.textContent = 'Plotting the sweetest route';
       el.card.classList.remove('done');
       el.quip.textContent = QUIPS[quipIdx];
