@@ -27,11 +27,32 @@ async function nominatim(address) {
   return r && { lat: +r.lat, lon: +r.lon, label: r.display_name };
 }
 
+// Remember recent lookups so planning the same address again skips the round trip.
+const MEMO = 'cm:geo', MEMO_KEEP = 50;
+const memoKey = (address) => address.trim().toLowerCase().replace(/\s+/g, ' ');
+
+function remembered(address) {
+  try { return JSON.parse(localStorage.getItem(MEMO) || '{}')[memoKey(address)]; } catch { return undefined; }
+}
+
+function remember(address, hit) {
+  try {
+    const memo = JSON.parse(localStorage.getItem(MEMO) || '{}');
+    delete memo[memoKey(address)];
+    memo[memoKey(address)] = hit; // re-insert: newest last
+    const keys = Object.keys(memo);
+    for (const k of keys.slice(0, Math.max(0, keys.length - MEMO_KEEP))) delete memo[k];
+    localStorage.setItem(MEMO, JSON.stringify(memo));
+  } catch { /* no storage */ }
+}
+
 export async function geocode(address) {
+  const known = remembered(address);
+  if (known) return known;
   for (const fn of [census, nominatim]) {
     try {
       const r = await fn(address);
-      if (r) return r;
+      if (r) { remember(address, r); return r; }
     } catch { /* try next */ }
   }
   throw new Error(`Couldn't find "${address}"`);

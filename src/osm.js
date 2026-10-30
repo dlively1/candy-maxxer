@@ -1,6 +1,7 @@
 // Fetch and parse OpenStreetMap data: walkable ways + candidate houses.
 
 import { polygonAreaCentroid } from './geo.js';
+import { cacheGet, cacheSet } from './cache.js';
 
 const ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
@@ -13,33 +14,72 @@ export function overpassQuery(lat, lon, radius) {
   return `[out:json][timeout:90];(way["highway"]${a};way["building"]${a};node["addr:housenumber"]${a};);out geom;`;
 }
 
-export async function fetchOsm(lat, lon, radius, onStatus = () => {}) {
-  const key = `cm:osm:${lat.toFixed(4)},${lon.toFixed(4)},${Math.round(radius)}`;
-  const cached = localStorage.getItem(key);
-  if (cached) return JSON.parse(cached);
+// Download sizes we try, smallest first: a 600 m circle covers most routes in a dense
+// neighborhood; sparse suburbs step up to a wider one.
+export const RADII = [600, 1000, 1500];
+// Areas are fetched around the center of a ~200 m grid cell (plus a margin covering the
+// whole cell), so GPS jitter and next-door addresses reuse the same cached download.
+const CELL_M = 200, CELL_MARGIN_M = 150;
+const M_PER_DEG = 111320;
 
+export function cellCenter(lat, lon) {
+  const dLat = CELL_M / M_PER_DEG;
+  const clat = Math.round(lat / dLat) * dLat;
+  const dLon = CELL_M / (M_PER_DEG * Math.cos((clat * Math.PI) / 180));
+  return [+clat.toFixed(6), +(Math.round(lon / dLon) * dLon).toFixed(6)];
+}
+
+// Only the fields and tags parseOsm reads (about a quarter smaller than the raw download).
+const KEEP_TAGS = new Set(['highway', 'service', 'name', 'ref', 'foot', 'access', 'area', 'bridge', 'tunnel',
+  'building', 'shop', 'amenity', 'office', 'craft', 'tourism', 'leisure', 'addr:housenumber', 'addr:street']);
+const round7 = (v) => Math.round(v * 1e7) / 1e7;
+
+export function compactOsm(data) {
+  const elements = [];
+  for (const e of data.elements) {
+    const tags = {};
+    for (const k in e.tags) if (KEEP_TAGS.has(k)) tags[k] = e.tags[k];
+    if (e.type === 'node') elements.push({ type: 'node', id: e.id, lat: round7(e.lat), lon: round7(e.lon), tags });
+    else if (e.geometry) {
+      elements.push({ type: 'way', id: e.id, nodes: e.nodes, tags,
+        geometry: e.geometry.map((g) => ({ lat: round7(g.lat), lon: round7(g.lon) })) });
+    }
+  }
+  return { elements };
+}
+
+const cacheKey = (clat, clon, r) => `osm:${clat},${clon}:${r}`;
+
+// Houses & streets around (lat, lon) covering at least `radius` m: from the cache if any saved
+// download of this cell is big enough, otherwise from Overpass (then saved).
+// Returns { data, radius, cached }.
+export async function loadOsm(lat, lon, radius, onStatus = () => {}) {
+  const [clat, clon] = cellCenter(lat, lon);
+  for (const r of RADII.filter((x) => x >= radius)) {
+    const data = await cacheGet(cacheKey(clat, clon, r));
+    if (data) return { data, radius: r, cached: true };
+  }
+  const data = compactOsm(await fetchOverpass(clat, clon, radius + CELL_MARGIN_M, onStatus));
+  cacheSet(cacheKey(clat, clon, radius), data);
+  return { data, radius, cached: false };
+}
+
+async function fetchOverpass(lat, lon, radius, onStatus) {
   // Public Overpass servers are often overloaded: ask them all, keep the first good answer,
   // and back off and retry if every one of them is busy.
   const body = 'data=' + encodeURIComponent(overpassQuery(lat, lon, radius));
-  let text;
-  for (let attempt = 0; !text; attempt++) {
+  for (let attempt = 0; ; attempt++) {
     onStatus(attempt ? `Map servers busy, retry ${attempt}…` : 'Fetching houses & streets from OpenStreetMap…');
     try {
-      text = await raceEndpoints(body);
+      return JSON.parse(await raceEndpoints(body));
     } catch {
       if (attempt >= 4) throw new Error('OpenStreetMap servers are busy right now. Try again in a few minutes.');
-      const wait = 5 * 2 ** attempt;
-      for (let s = wait; s > 0; s--) {
+      for (let s = 5 * 2 ** attempt; s > 0; s--) {
         onStatus(`Map servers busy, retrying in ${s}s…`);
         await new Promise((r) => setTimeout(r, 1000));
       }
     }
   }
-  try {
-    clearOldCache();
-    localStorage.setItem(key, text);
-  } catch { /* quota exceeded: skip caching */ }
-  return JSON.parse(text);
 }
 
 async function raceEndpoints(body) {
@@ -60,9 +100,10 @@ async function raceEndpoints(body) {
   }
 }
 
-function clearOldCache() {
+// The old cache kept one raw download in localStorage (up to ~5 MB); free that space.
+try {
   for (const k of Object.keys(localStorage)) if (k.startsWith('cm:osm:')) localStorage.removeItem(k);
-}
+} catch { /* no storage */ }
 
 // --- Parsing (pure; runs in Node tests too) ---
 
