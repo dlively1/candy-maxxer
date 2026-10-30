@@ -16,6 +16,7 @@ import { shareLink } from './share.js';
 import { initPill } from './pill.js';
 import { addressBox, locate, reverse, placeLabel } from './address.js';
 import { initSheet } from './sheet.js';
+import { hauntIcon, hauntPeak, haunting } from './haunts.js';
 
 const $ = (id) => document.getElementById(id);
 const M_PER_MI = 1609.344, FT_PER_M = 3.28084;
@@ -26,28 +27,7 @@ const HOME_BADGE = `<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" 
   <path d="M8.5 16.5 16 9.5l7.5 7V24h-15Z" fill="#f5c542"/><rect x="14" y="18.5" width="4" height="5.5" rx="1" fill="#14111c"/></svg>`;
 const HOME_SVG = `${HOME_BADGE}<span class="finish-flag" aria-hidden="true">🏁</span>`;
 // The start pin while choosing: the home badge on a little stem, floating over its haunted house.
-const PIN_HTML = `<span class="pin-b">${HOME_BADGE}</span><i class="pin-stem"></i>`;
-// Haunted houses to pick a start from: a towered one (drawn either way round) and a gabled one
-// with a crooked chimney. Windows glow; each house gets its own tilt, size and flicker.
-const HAUNTS = [
-  `<path class="hb-body" d="M4 33V18l9-8.5 9 8.5v15Z"/><path class="hb-body" d="M20.5 33V13l3.75-8 3.75 8v20Z"/>
-  <rect class="win" x="7.5" y="21" width="3" height="4" rx=".5"/><rect class="win w2" x="14" y="21" width="3" height="4" rx=".5"/>
-  <rect class="win w3" x="23" y="15" width="2.5" height="3.5" rx="1.2"/><path class="door" d="M11.2 33v-4.5a1.8 1.8 0 0 1 3.6 0V33Z"/>`,
-  `<path class="hb-body" d="M20 13.5V5.5l3.4-.8v11.5Z"/><path class="hb-body" d="M3 33V18.5L15.5 7 28 18.5V33Z"/>
-  <circle class="win w3" cx="15.5" cy="16" r="2"/><rect class="win" x="7" y="22" width="3.4" height="4.2" rx=".5"/>
-  <rect class="win w2" x="20.6" y="22" width="3.4" height="4.2" rx=".5"/><path class="door" d="M13.6 33v-5a1.9 1.9 0 0 1 3.8 0v5Z"/>`,
-];
-const hauntSvg = (v) => `<svg viewBox="0 0 32 34" aria-hidden="true">${
-  v === 1 ? `<g transform="matrix(-1 0 0 1 32 0)">${HAUNTS[0]}</g>` : HAUNTS[v ? 1 : 0]}</svg>`;
-function hauntIcon(id, extra = '') {
-  const r = (k) => ((((id * (7919 * k + 13)) % 1000) + 1000) % 1000) / 1000; // steady per-house "random"
-  return L.divIcon({
-    className: `haunt${r(4) < 0.3 ? ' flicker' : ''}${extra}`,
-    html: `<span class="hb" style="--tilt:${((r(1) - 0.5) * 10).toFixed(1)}deg;--s:${(0.88 + r(2) * 0.24).toFixed(2)};--d:${(-r(5) * 5).toFixed(2)}s">${
-      hauntSvg(Math.floor(r(3) * 3))}</span>`,
-    iconSize: [30, 32], iconAnchor: [15, 22], tooltipAnchor: [0, -22],
-  });
-}
+const PIN_HTML = `<span class="pin-b"><span class="pin-bob">${HOME_BADGE}</span></span><i class="pin-stem"></i>`;
 // Turnarounds: a little U-turn badge in the route's color, so a mid-street end of the line reads as "come back".
 const uturnSvg = (color) => `<svg viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="11.5" fill="#14111c" stroke="${color}" stroke-width="2"/>
   <path d="M9 19v-7.5a4 4 0 0 1 8 0V17" fill="none" stroke="#fff3d6" stroke-width="2.2" stroke-linecap="round"/>
@@ -389,12 +369,16 @@ function showPin() {
   layers.pick.clearLayers();
   if (!start) return;
   const ready = inArea(area, start); // before its neighborhood loads, just the pin
-  if (ready && !area.houses.some((h) => h.id === start.house)) {
-    L.marker([start.lat, start.lon], { icon: hauntIcon(Math.round(start.lat * 1e5 + start.lon * 1e5), ' chosen lone'), interactive: false, keyboard: false })
+  const onHouse = ready && area.houses.some((h) => h.id === start.house);
+  const loneId = Math.round(start.lat * 1e5 + start.lon * 1e5);
+  if (ready && !onHouse) {
+    L.marker([start.lat, start.lon], { icon: hauntIcon(loneId, ' chosen lone'), interactive: false, keyboard: false })
       .addTo(layers.pick);
   }
+  // The stem's tip floats just above the chosen house's roof.
+  const peak = ready ? hauntPeak(onHouse ? start.house : loneId) + 4 : 8;
   const pin = L.marker([start.lat, start.lon], {
-    icon: L.divIcon({ className: 'start-pin', html: PIN_HTML, iconSize: [32, 46], iconAnchor: [16, 70] }),
+    icon: L.divIcon({ className: 'start-pin', html: PIN_HTML, iconSize: [32, 46], iconAnchor: [16, Math.round(46 + peak)] }),
     draggable: true, zIndexOffset: 2000, keyboard: false,
   }).addTo(layers.pick);
   dragPreview(pin);
@@ -412,7 +396,7 @@ function preview(i) {
   if (old >= 0) { haunts.get(old)?.getElement()?.classList.remove('near'); styleHouse(area.houses[old], old); }
   if (i >= 0) {
     haunts.get(i)?.getElement()?.classList.add('near');
-    housePolys[i]?.setStyle({ color: '#ffd36b', fillColor: '#ffd36b', fillOpacity: 0.9 });
+    housePolys[i]?.setStyle({ color: '#ffb347', fillColor: '#ffb347', fillOpacity: 0.55 });
   }
 }
 function dragPreview(marker) {
@@ -429,6 +413,7 @@ function dragPreview(marker) {
 const HAUNT_ZOOM = 16.5, HAUNT_MAX = 220;
 const haunts = new Map(); // house index → marker
 let hauntsFor = null, hauntsHidden = false;
+const haunter = haunting(() => [...haunts.values()]);
 function renderHaunts() {
   const on = phase === 'pick' && !!area && map.getZoom() >= HAUNT_ZOOM;
   let near = [];
@@ -447,7 +432,7 @@ function renderHaunts() {
     const h = area.houses[i];
     const m = L.marker([h.lat, h.lon], { icon: hauntIcon(h.id), keyboard: false, riseOnHover: true })
       .on('click', (e) => { L.DomEvent.stopPropagation(e); pickHouse(i); });
-    if (canHover.matches) m.bindTooltip(esc(h.address || 'Haunted house'), { direction: 'top' }); // on touch it would cover the pin
+    if (canHover.matches && h.address) m.bindTooltip(esc(h.address), { direction: 'top' }); // on touch it would cover the pin
     haunts.set(i, m.addTo(layers.haunts));
   }
   for (const [i, m] of haunts) {
@@ -455,6 +440,7 @@ function renderHaunts() {
     m.getElement()?.classList.toggle('chosen', me);
     m.setZIndexOffset(me ? 500 : 0);
   }
+  if (haunts.size && !reduced.matches) haunter.start(); else haunter.stop();
   if (phase === 'pick' && barState === 'start') pickbar();
 }
 map.on('moveend', renderHaunts);
@@ -712,7 +698,7 @@ function styleHouse(h, i) {
   const mine = stopOrder[focus]?.get(i);
   const other = shown?.routes.length > 1 ? stopOrder[1 - focus]?.get(i) : undefined;
   let fill = '#5b536c', opacity = 0.35;
-  if (phase !== 'plan' && h.id === start?.house) { fill = '#ffd36b'; opacity = 0.9; }
+  if (phase !== 'plan' && h.id === start?.house) { fill = '#ffb347'; opacity = 0.5; } // a warm wash under its haunted house
   else if (ov === 'dark') { fill = '#3a3448'; opacity = 0.9; }
   else if (ov === 'star') { fill = '#f5c542'; opacity = 0.9; }
   else if (mine) { fill = ROUTE_COLORS[focus]; opacity = 0.9; }
