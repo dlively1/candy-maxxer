@@ -7,7 +7,9 @@ and gets you home — with hills priced in.
 
 1. **Start** — your location (browser geolocation, named via Photon reverse geocoding), a type-ahead
    pick (Photon, biased toward you), or a typed address (US Census geocoder via JSONP, Nominatim fallback).
-2. **Houses & streets** — one Overpass (OpenStreetMap) query, 1 km radius, cached in `localStorage`.
+2. **Houses & streets** — one Overpass (OpenStreetMap) query (600 m, widening to 1.5 km if sparse), raced
+   across four public servers and saved in IndexedDB. A saved neighboring download is reused when it
+   covers the spot, and stands in when every server is busy.
 3. **Elevation** — AWS Terrain Tiles (Terrarium PNGs, USGS 3DEP ~10 m), decoded in the browser.
 4. **Walking graph** — streets densified to ≤20 m; each edge timed with Tobler's hiking function,
    separately uphill and downhill. Bridges and tunnels ramp straight between their ends (the terrain

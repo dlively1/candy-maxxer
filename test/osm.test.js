@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { cellCenter, compactOsm, parseOsm, RADII } from '../src/osm.js';
+import { cellCenter, compactOsm, parseOsm, RADII, savedAreas } from '../src/osm.js';
 import { makeProjection } from '../src/geo.js';
 import { START } from './helpers.js';
 
@@ -43,4 +43,15 @@ test('compacting keeps everything the parser uses', () => {
 test('download sizes step up from small to large', () => {
   assert.deepEqual(RADII, [...RADII].sort((a, b) => a - b));
   assert.ok(RADII[0] <= 600);
+});
+
+test('saved downloads are ranked by how far they reach from a new start', () => {
+  const [clat, clon] = cellCenter(START.lat, START.lon);
+  const near = `osm:${clat},${clon}:600`;
+  // A 1000 m download centered ~400 m north still reaches well past the start.
+  const north = `osm:${+(clat + 400 / M_PER_DEG).toFixed(6)},${clon}:1000`;
+  const got = savedAreas([near, north, 'not-an-area'], clat, clon);
+  assert.deepEqual(got.map((s) => s.key), [north, near]);
+  assert.ok(Math.abs(got[0].reach - (1000 + 150 - 400)) < 1, `${got[0].reach}`);
+  assert.equal(got[1].reach, 600 + 150);
 });

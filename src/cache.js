@@ -29,6 +29,11 @@ export async function cacheGet(key) {
   try { return await run('readonly', (s) => s.get(key)); } catch { return undefined; }
 }
 
+// Keys of everything saved (no big values read).
+export function cacheKeys() {
+  try { return Object.keys(JSON.parse(localStorage.getItem(INDEX) || '{}')); } catch { return []; }
+}
+
 export async function cacheSet(key, value) {
   try {
     await run('readwrite', (s) => s.put(value, key));
