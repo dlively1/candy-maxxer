@@ -279,6 +279,35 @@ footer a { color: var(--ink-2); }
 @keyframes home-ping { from { transform: scale(1); opacity: .8; } to { transform: scale(2.2); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .home-icon::after { animation: none; opacity: 0; } }
 
+/* Finish: once the line gets home, a little checkered flag plants itself on the house. */
+.home-icon .finish-flag {
+  position: absolute; left: 19px; top: -13px; font-size: 17px; line-height: 1; pointer-events: none;
+  filter: drop-shadow(0 1px 2px #000); transform-origin: 15% 100%; opacity: 0; transform: scale(0) rotate(-30deg);
+}
+.home-icon.arrived .finish-flag { opacity: 1; transform: none; }
+.home-icon.arriving .finish-flag { animation: flag-plant .7s cubic-bezier(.3, 1.6, .5, 1) both, flag-wave 2.6s ease-in-out .7s infinite; }
+.home-icon.arrived:not(.arriving) .finish-flag { animation: flag-wave 2.6s ease-in-out infinite; }
+.home-icon.arriving svg { animation: home-hop .6s cubic-bezier(.3, 1.6, .5, 1); }
+@keyframes flag-plant { from { opacity: 0; transform: scale(0) rotate(-30deg); } to { opacity: 1; transform: none; } }
+@keyframes flag-wave { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(-9deg); } }
+@keyframes home-hop { 40% { transform: translateY(-6px) scale(1.12); } }
+
+/* Turnarounds: a U-turn badge pops in as the line reaches it, then breathes gently. */
+.uturn-icon span { display: block; animation: uturn-pop .5s cubic-bezier(.3, 1.6, .5, 1) both, uturn-breathe 3s ease-in-out .5s infinite; }
+.uturn-icon svg { display: block; width: 26px; height: 26px; filter: drop-shadow(0 0 3px #000) drop-shadow(0 1px 2px #000); }
+@keyframes uturn-pop { from { transform: scale(0) rotate(-120deg); } to { transform: none; } }
+@keyframes uturn-breathe { 50% { transform: scale(1.1); } }
+
+/* The walking lane: soft dots drifting the way you walk, just right of the line. */
+.route-flow {
+  stroke-dasharray: 0.1 13; animation: route-flow 1.5s linear infinite, route-flow-in .8s ease-out;
+  filter: drop-shadow(0 0 2px #ffcf7a);
+}
+@keyframes route-flow { to { stroke-dashoffset: -13.1; } }
+@keyframes route-flow-in { from { opacity: 0; } }
+body.replanning .route-flow { opacity: .2; }
+@media (prefers-reduced-motion: reduce) { .uturn-icon span, .home-icon .finish-flag { animation: none !important; } }
+
 /* Quick re-plans: the map stays put, the numbers dim, a pumpkin spins up top. */
 #replan {
   position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 50%; z-index: 600; transform: translateX(-50%);

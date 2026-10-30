@@ -69,3 +69,15 @@ export function stepText(s) {
     default: return `Turn ${s.action} onto ${on}`;
   }
 }
+
+// Where each "turn around" step begins, as an index into the route's points (point 0 is home,
+// point j is the end of the j-th edge walked), so the map can mark the spot and time its reveal.
+export function turnaroundPoints(steps) {
+  const at = [];
+  let walked = 0;
+  for (const s of steps) {
+    if (s.action === 'turn around') at.push(walked);
+    walked += s.edges.length;
+  }
+  return at;
+}

@@ -8,8 +8,8 @@ import { buildNetwork, buildCSR, attachHouses, levelStructures } from './graph.j
 import { candyValue, OVERRIDES } from './candy.js';
 import { PACES } from './tobler.js';
 import { renderProfile } from './profile.js';
-import { arrowLayer } from './arrows.js';
-import { buildSteps, stepText } from './directions.js';
+import { arrowLayer, flowLayer } from './arrows.js';
+import { buildSteps, stepText, turnaroundPoints } from './directions.js';
 import { createLoader } from './loader.js';
 import { shareLink } from './share.js';
 import { initPill } from './pill.js';
@@ -21,7 +21,12 @@ const M_PER_MI = 1609.344, FT_PER_M = 3.28084;
 const ROUTE_COLORS = ['#de7218', '#358de8']; // validated pair: distinct under color-vision deficiency
 const reduced = matchMedia('(prefers-reduced-motion: reduce)');
 const HOME_SVG = `<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14.5" fill="#14111c" stroke="#f5c542" stroke-width="2"/>
-  <path d="M8.5 16.5 16 9.5l7.5 7V24h-15Z" fill="#f5c542"/><rect x="14" y="18.5" width="4" height="5.5" rx="1" fill="#14111c"/></svg>`;
+  <path d="M8.5 16.5 16 9.5l7.5 7V24h-15Z" fill="#f5c542"/><rect x="14" y="18.5" width="4" height="5.5" rx="1" fill="#14111c"/></svg>
+  <span class="finish-flag" aria-hidden="true">🏁</span>`;
+// Turnarounds: a little U-turn badge in the route's color, so a mid-street end of the line reads as "come back".
+const uturnSvg = (color) => `<svg viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="11.5" fill="#14111c" stroke="${color}" stroke-width="2"/>
+  <path d="M9 19v-7.5a4 4 0 0 1 8 0V17" fill="none" stroke="#fff3d6" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="m13.8 14.6 3.2 3.4 3.2-3.4" fill="none" stroke="#fff3d6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 const map = L.map('map', { preferCanvas: true, zoomControl: true }).setView([40.4406, -79.9959], 12); // Pittsburgh until a plan
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -447,7 +452,23 @@ function draw({ reveal = false, tween = false } = {}) {
     fitNext = false;
     map.fitBounds(L.latLngBounds(geo.flatMap((x) => x.pts)), { ...fitPad(30), maxZoom: 17, animate: false });
   }
-  const arrows = () => arrowLayer(map, geo[focus].pts, color(focus), { pop: true }).addTo(layers.arrows);
+  const arrows = () => {
+    if (!reduced.matches) flowLayer(map, geo[focus].pts).addTo(layers.arrows);
+    arrowLayer(map, geo[focus].pts, color(focus), { pop: true, avoid: turns.map((t) => geo[focus].pts[t.j]) }).addTo(layers.arrows);
+  };
+  const turns = turnaroundPoints(buildSteps(g, area.net, routes[focus].legs)).map((j) => ({
+    j, done: false,
+    mark: L.marker(geo[focus].pts[j], {
+      icon: L.divIcon({ className: 'uturn-icon', html: `<span>${uturnSvg(color(focus))}</span>`, iconSize: [26, 26], iconAnchor: [13, 13] }),
+      keyboard: false,
+    }).bindTooltip('Turn around here and head back'),
+  }));
+  const showTurns = (n = Infinity) => { for (const t of turns) if (!t.done && t.j < n) { t.done = true; t.mark.addTo(layers.arrows); } };
+  const home = L.marker([start.lat, start.lon], {
+    icon: L.divIcon({ className: 'home-icon', html: HOME_SVG, iconSize: [32, 32], iconAnchor: [16, 16] }),
+    zIndexOffset: 1000,
+  }).bindTooltip(`Start & finish: ${start.label}`);
+  const arrive = (celebrate) => home.getElement()?.classList.add('arrived', ...(celebrate ? ['arriving'] : []));
   if (reveal && !reduced.matches) {
     // Porch lights: each stop on the followed route waits dark until the line reaches it.
     const r = routes[focus], lit = [];
@@ -456,18 +477,17 @@ function draw({ reveal = false, tween = false } = {}) {
     for (const [idx] of lit) housePolys[idx].setStyle({ color: '#5b536c', fillColor: '#5b536c', fillOpacity: 0.35 });
     let next = 0;
     const reached = (n) => {
+      showTurns(n);
       for (; next < lit.length && lit[next][1] < n; next++) {
         const idx = lit[next][0];
         housePolys[idx].setStyle({ color: '#ffd36b', fillColor: '#ffd36b', fillOpacity: 1 });
         setTimeout(() => styleHouse(area.houses[idx], idx), 350);
       }
     };
-    drawIn(lines, geo[focus].pts.length, reached, () => { arrows(); pill.nudge(); });
+    home.addTo(layers.route);
+    drawIn(lines, geo[focus].pts.length, reached, () => { arrows(); arrive(true); pill.nudge(); });
   }
-  else { arrows(); if (reveal) pill.nudge(); }
-  L.marker([start.lat, start.lon], {
-    icon: L.divIcon({ className: 'home-icon', html: HOME_SVG, iconSize: [32, 32], iconAnchor: [16, 16] }),
-  }).bindTooltip(`Start & finish: ${start.label}`).addTo(layers.route);
+  else { arrows(); showTurns(); home.addTo(layers.route); arrive(false); if (reveal) pill.nudge(); }
 
   renderProfile($('profile'), routes.map((r, i) => ({ label: r.label, color: color(i), focused: i === focus, pts: geo[i].prof })), {
     onHover: (hits) => {
