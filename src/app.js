@@ -1,7 +1,7 @@
 // Wires the pipeline to the page: geocode → OSM → elevation → graph → solver worker → map.
 
 import { geocode } from './geocode.js';
-import { fetchOsm, parseOsm } from './osm.js';
+import { loadOsm, parseOsm, RADII } from './osm.js';
 import { elevations } from './elevation.js';
 import { makeProjection } from './geo.js';
 import { buildNetwork, buildCSR, attachHouses, levelStructures } from './graph.js';
@@ -71,6 +71,7 @@ addressBox({
   onPick: (it) => { pin(it.label, it.lat, it.lon); run(); },
 });
 $('locate').addEventListener('click', () => useMyLocation(false));
+$('address').addEventListener('change', prefetch); // typed a new address and moved on
 
 async function useMyLocation(quiet) {
   const btn = $('locate');
@@ -82,7 +83,8 @@ async function useMyLocation(quiet) {
     run();
   } catch (e) {
     // Denied, unavailable, or timed out: the default address is still there to use.
-    if (!quiet) status(e.code === 1 ? 'Location is blocked: allow it in your browser settings, or type an address.' : 'Couldn’t find you. Type an address instead.', true);
+    if (quiet) prefetch();
+    else status(e.code === 1 ? 'Location is blocked: allow it in your browser settings, or type an address.' : 'Couldn’t find you. Type an address instead.', true);
   } finally {
     btn.classList.remove('busy');
   }
@@ -125,17 +127,24 @@ function status(msg, isError = false) {
   if (!isError) loader.stage(msg);
 }
 
-// One fetch per address. At ~1 min per house, 1 km holds far more houses than even 3 hours can visit.
-const RADIUS_M = 1000;
+// Houses a plan of this length wants within reach before we stop widening the download.
+// (The solver keeps ~5 per minute as candidates, but real routes visit about 1 per minute.)
+const housesWanted = (budgetMin) => Math.max(150, budgetMin * 3);
 
-async function loadArea(address) {
+async function loadArea(address, budgetMin, minRadius = 0) {
   status('Finding address…');
   loader.stage('Finding address…', 0.05);
   const start = pinned?.address === address ? { lat: pinned.lat, lon: pinned.lon, label: address } : await geocode(address);
   loader.stage('Fetching houses & streets…', 0.3);
-  const osm = await fetchOsm(start.lat, start.lon, RADIUS_M, status);
   const proj = makeProjection(start.lat, start.lon);
-  const { ways, houses } = parseOsm(osm, proj);
+  let osm, ways, houses, downloaded = false;
+  // Start with the smallest download; step up only if it doesn't hold enough houses.
+  for (const r of RADII.filter((x) => x > minRadius)) {
+    osm = await loadOsm(start.lat, start.lon, r, status);
+    downloaded ||= !osm.cached;
+    ({ ways, houses } = parseOsm(osm.data, proj));
+    if (houses.length >= housesWanted(budgetMin)) break;
+  }
   if (!ways.length) throw new Error('No walkable streets found near that address.');
   const net = buildNetwork(ways, proj);
   status(`Measuring hills under ${net.n.toLocaleString()} street points…`);
@@ -145,22 +154,50 @@ async function loadArea(address) {
   levelStructures(net, z);
   const snap = net.grid.nearest(0, 0, 400, net.walkable);
   if (!snap) throw new Error('That address is too far from any walkable street.');
-  return { address, start, proj, net, houses, z, houseZ, startNode: snap.id };
+  return { address, start, proj, net, houses, z, houseZ, startNode: snap.id, radius: osm.radius, downloaded };
+}
+
+// One load per address, shared by background prefetches and plans. A longer plan than the
+// area was sized for widens it.
+let areaJob = null; // { address, promise, done }
+async function areaFor(address, budgetMin) {
+  if (areaJob?.address !== address) {
+    const job = { address, done: false };
+    job.promise = loadArea(address, budgetMin).finally(() => { job.done = true; });
+    areaJob = job;
+  }
+  const job = areaJob;
+  let a;
+  try { a = await job.promise; } catch (e) { if (areaJob === job) areaJob = null; throw e; }
+  if (a.houses.length < housesWanted(budgetMin) && a.radius < RADII.at(-1) && areaJob === job) {
+    const wider = { address, done: false };
+    wider.promise = loadArea(address, budgetMin, a.radius).finally(() => { wider.done = true; });
+    areaJob = wider;
+    return wider.promise;
+  }
+  return a;
+}
+
+// Start loading in the background so the first plan has less to wait for.
+function prefetch() {
+  const address = $('address').value.trim();
+  if (address) areaFor(address, +$('budget').value).catch(() => { /* the real plan will retry and report */ });
 }
 
 async function run() {
   const address = $('address').value.trim();
   const budgetMin = +$('budget').value;
   $('go').disabled = true;
+  // Already loaded, or a background prefetch finished? Then there's nothing to wait for but the
+  // solver, and the celebration can be quick.
+  const loaded = area?.address === address && area.houses.length >= housesWanted(budgetMin);
+  const ready = loaded || (areaJob?.address === address && areaJob.done);
   loader.show();
-  progressBase = 0;
+  progressBase = ready ? 0 : 0.42;
   try {
-    if (!area || area.address !== address) {
-      area = await loadArea(address);
-      fitNext = true;
-      progressBase = 0.42;
-    }
-    await solveAndDraw(budgetMin);
+    const next = loaded ? area : await areaFor(address, budgetMin);
+    if (next !== area) { area = next; fitNext = true; }
+    await solveAndDraw(budgetMin, { quick: ready || !area.downloaded });
   } catch (e) {
     console.error(e);
     status(e.message, true);
@@ -170,7 +207,7 @@ async function run() {
   }
 }
 
-async function solveAndDraw(budgetMin) {
+async function solveAndDraw(budgetMin, { quick = true } = {}) {
   const pace = PACES[$('pace').value];
   const porchSec = +$('porch').value;
   const { net, houses, z, houseZ, startNode } = area;
@@ -193,7 +230,7 @@ async function solveAndDraw(budgetMin) {
   shown = { g, routes: res.routes, budgetMin };
   focus = Math.min(focus, res.routes.length - 1);
   progressBase = 0;
-  await loader.finish(res.routes[0].candy);
+  await loader.finish(res.routes[0].candy, { quick });
   if (seq !== solveSeq) return;
   draw({ reveal: true });
   status(`Weighed up ${res.routes[0].considered} nearby houses in ${(res.ms / 1000).toFixed(1)} s.`);

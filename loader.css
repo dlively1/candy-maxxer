@@ -6,6 +6,7 @@
   opacity: 0; transition: opacity .45s ease; pointer-events: none;
 }
 #loader.on { opacity: 1; pointer-events: auto; }
+#loader.quick { transition-duration: .25s; }
 
 .ld-sky {
   position: absolute; inset: 0;
