@@ -19,7 +19,7 @@ const QUIPS = [
   'Measuring every hill twice, walking it once…',
 ];
 const CANDY = ['🍬', '🍭', '🍫', '🍬', '🍭', '🍫', '🍪', '🧁'];
-const MIN_SHOW_MS = 1100;
+const MIN_SHOW_MS = 1100, QUICK_MIN_SHOW_MS = 400;
 const reduced = matchMedia('(prefers-reduced-motion: reduce)');
 
 export function createLoader(root) {
@@ -107,6 +107,7 @@ export function createLoader(root) {
       el.quip.textContent = QUIPS[quipIdx];
       el.quip.classList.add('in');
       root.hidden = false;
+      root.classList.remove('quick');
       requestAnimationFrame(() => root.classList.add('on'));
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(tick);
@@ -125,28 +126,30 @@ export function createLoader(root) {
         target = candy;
       }
     },
-    // Celebrate, then fade out. Resolves once the map is visible again.
-    async finish(candy) {
+    // Celebrate, then fade out. Resolves once the map is visible again. `quick` (nothing had
+    // to download) keeps the burst but trims the waiting around it.
+    async finish(candy, { quick = false } = {}) {
       if (!visible) return;
       target = candy;
       frac = creepTo = 1;
       clearInterval(idleTimer);
       clearInterval(quipTimer);
-      const wait = Math.max(0, MIN_SHOW_MS - (performance.now() - shownAt));
+      const wait = Math.max(0, (quick ? QUICK_MIN_SHOW_MS : MIN_SHOW_MS) - (performance.now() - shownAt));
       await sleep(wait);
       el.title.textContent = `≈ ${Math.round(candy)} pieces!`;
       el.card.classList.add('done');
       for (let i = 0; i < 26; i++) fling(true);
-      await sleep(reduced.matches ? 300 : 900);
-      await this.hide();
+      await sleep(reduced.matches ? 250 : quick ? 450 : 900);
+      await this.hide({ quick });
     },
-    async hide() {
+    async hide({ quick = false } = {}) {
       if (!visible) return;
       visible = false;
       clearInterval(idleTimer);
       clearInterval(quipTimer);
+      root.classList.toggle('quick', quick);
       root.classList.remove('on');
-      await sleep(450);
+      await sleep(quick ? 250 : 450);
       if (!visible) { root.hidden = true; cancelAnimationFrame(raf); el.flyers.replaceChildren(); }
     },
   };
