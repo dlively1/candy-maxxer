@@ -129,12 +129,15 @@ export function buildCSR(net, z, pace) {
   return { n, start, from, to, sec, name, rise, len };
 }
 
+// Between the doors of a duplex or a row of houses: down one front path, up the next.
+export const NEXT_DOOR_SEC = 8;
+
 // Snap each house to a street node (preferring its addressed street) and price the door detour:
-// walk up the front path, ring the bell, walk back down.
+// walk up the front path, ring the bell at each of its doors, walk back down.
 export function attachHouses(net, houses, houseZ, z, { pace, porchSec }) {
   const out = [];
   houses.forEach((h, i) => {
-    const street = h.address && h.address.replace(/^\S+\s+/, '');
+    const street = h.street;
     const sid = street && net.nameIdx.get(street);
     let snap = sid !== undefined && sid !== null
       ? net.grid.nearest(h.x, h.y, 120, (node) => net.walkable(node) && net.nodeNames[node].has(sid))
@@ -143,7 +146,8 @@ export function attachHouses(net, houses, houseZ, z, { pace, porchSec }) {
     if (!snap) return;
     const path = Math.max(3, snap.dist - 11); // ~4m road half-width + ~7m from front door to centroid
     const dz = houseZ[i] - z[snap.id];
-    const doorSec = walkSeconds(path, dz, pace) + walkSeconds(path, -dz, pace) + porchSec;
+    const units = h.units || 1;
+    const doorSec = walkSeconds(path, dz, pace) + walkSeconds(path, -dz, pace) + units * porchSec + (units - 1) * NEXT_DOOR_SEC;
     out.push({ ...h, index: i, node: snap.id, doorSec, z: houseZ[i] });
   });
   return out;

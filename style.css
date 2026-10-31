@@ -400,6 +400,13 @@ body.replanning .route-flow { opacity: .2; }
   animation: haunt-rise .6s ease-out backwards;
 }
 .haunt.sinking { pointer-events: none; }
+/* A duplex or a row of houses: a little hand-lettered sign with its door count. */
+.haunt .hu {
+  position: absolute; right: -7px; bottom: 2px; padding: 0 4px; border-radius: 6px; pointer-events: none;
+  background: #f3e6c8; color: #3a2410; font: 700 10px/14px system-ui, sans-serif; box-shadow: 0 1px 3px #000a, 0 0 0 1px #6b4a26;
+  transform: rotate(-8deg) scale(var(--hz, 1)); animation: haunt-rise .6s ease-out backwards;
+}
+.haunt.sinking .hu { animation: haunt-sink .42s cubic-bezier(.5, 0, .8, .4) forwards; }
 .haunt.sinking .hb { animation: haunt-sink .42s cubic-bezier(.5, 0, .8, .4) forwards; }
 .haunt .mist { /* rising or sinking, the house stirs up a little ground mist */
   position: absolute; left: 50%; bottom: -4px; width: 50px; height: 16px; margin-left: -25px; border-radius: 50%;

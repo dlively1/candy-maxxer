@@ -29,8 +29,14 @@ and gets you home — with hills priced in.
 7. **Directions** — chevrons along the followed route (right of travel, so out-and-back streets read as
    "down this side, back that side") and turn-by-turn steps, including turn-arounds.
 
-Candy model (`src/candy.js`): 2 pieces/house, up to +1 for big footprints; click a house to mark it
-⭐ full-size (6) or 🌑 dark (0). Overrides persist in `localStorage`.
+Candy model (`src/candy.js`): 2 pieces per door, up to +1 for big homes; click a house to mark it
+⭐ full-size (6 per door) or 🌑 dark (0). Overrides persist in `localStorage`.
+
+Doors per building (`src/osm.js`): duplexes and rows of houses get one per unit, from several house
+numbers on the building (`12;14`, `12-16`), several address points inside its outline, `building:flats`,
+`building=duplex`/`triplex`, or, for an unaddressed `building=terrace`, its footprint (~65 m² a house).
+Apartment buildings are one door (a shared entrance). A stop walks up once, rings every door (8 s between
+them), and walks back.
 
 ## Share a route
 

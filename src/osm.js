@@ -34,7 +34,7 @@ export function cellCenter(lat, lon) {
 
 // Only the fields and tags parseOsm reads (about a quarter smaller than the raw download).
 const KEEP_TAGS = new Set(['highway', 'service', 'name', 'ref', 'foot', 'access', 'area', 'bridge', 'tunnel',
-  'building', 'shop', 'amenity', 'office', 'craft', 'tourism', 'leisure', 'addr:housenumber', 'addr:street']);
+  'building', 'shop', 'amenity', 'office', 'craft', 'tourism', 'leisure', 'addr:housenumber', 'addr:street', 'building:flats']);
 const round7 = (v) => Math.round(v * 1e7) / 1e7;
 
 export function compactOsm(data) {
@@ -156,7 +156,13 @@ export function isWalkable(tags) {
   return true;
 }
 
-const HOUSE_TYPES = new Set(['house', 'detached', 'residential', 'semidetached_house', 'bungalow', 'terrace', 'farm', 'yes']);
+const HOUSE_TYPES = new Set(['house', 'detached', 'residential', 'semidetached_house', 'bungalow', 'terrace', 'farm', 'yes',
+  'apartments', 'duplex', 'triplex']);
+// Footprint limits (m²) by building type; anything else uses the house range.
+const SIZE = { yes: [70, 600], terrace: [90, 4000], apartments: [90, 6000], duplex: [60, 1200], triplex: [80, 1500] };
+const HOUSE_SIZE = [45, 900];
+const ROW_HOUSE_M2 = 65; // a typical row house's footprint, to guess the doors in an unaddressed terrace
+const MAX_UNITS = 12;
 
 export function wayName(tags) {
   if (tags.name) return tags.name;
@@ -189,17 +195,65 @@ export function parseOsm(data, proj) {
       if (h) houses.push(h);
     }
   }
-  // Attach stray address points (not on a building) to the nearest unaddressed house.
+  // Address points inside a building are its doors (a duplex mapped as one outline with an address
+  // point per half); stray ones (not on a building) go to the nearest unaddressed house.
   for (const n of addrNodes) {
     const [x, y] = proj.toXY(n.lat, n.lon);
+    const inside = houses.find((h) => inPolygon(x, y, h.pts));
+    if (inside) {
+      for (const num of houseNumbers(n.tags['addr:housenumber'])) inside.numbers.add(num);
+      if (!inside.address) { inside.address = formatAddress(n.tags); inside.street = n.tags['addr:street']; }
+      continue;
+    }
     let best = null, bd = 30;
     for (const h of houses) {
       const d = Math.hypot(h.x - x, h.y - y);
       if (d < bd && !h.address) { bd = d; best = h; }
     }
-    if (best) best.address = formatAddress(n.tags);
+    if (best) { best.address = formatAddress(n.tags); best.street = n.tags['addr:street']; }
+  }
+  for (const h of houses) {
+    h.units = doors(h);
+    delete h.pts; delete h.numbers; delete h.kind; delete h.flats;
   }
   return { ways, houses };
+}
+
+// How many front doors a building has. Apartments count as one (a shared entrance); otherwise
+// separate house numbers, then a mapped flat count, then (for a whole row of terraced houses) a
+// guess from the footprint.
+function doors(h) {
+  if (h.kind === 'apartments') return 1;
+  let n = h.numbers.size;
+  if (n < 2 && h.flats > 1) n = h.flats;
+  if (n < 2) n = { duplex: 2, triplex: 3 }[h.kind] || (h.kind === 'terrace' ? Math.round(h.area / ROW_HOUSE_M2) : 1);
+  return Math.max(1, Math.min(MAX_UNITS, n));
+}
+
+// "12", "12;14", "12, 14", "12-16" (a range on one side of the street: 12, 14, 16). Letters and
+// fractions ("12A", "12 1/2") are a single number.
+export function houseNumbers(v) {
+  if (!v) return [];
+  const parts = String(v).split(/\s*[;,]\s*/).filter(Boolean);
+  const out = [];
+  for (const p of parts) {
+    const m = /^(\d+)\s*-\s*(\d+)$/.exec(p);
+    const a = m && +m[1], b = m && +m[2];
+    if (m && b > a && b - a <= 2 * MAX_UNITS) {
+      const step = (b - a) % 2 === 0 ? 2 : 1;
+      for (let k = a; k <= b && out.length < MAX_UNITS; k += step) out.push(String(k));
+    } else out.push(p);
+  }
+  return out;
+}
+
+function inPolygon(x, y, pts) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i], [xj, yj] = pts[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
 }
 
 function parseHouse(el, proj) {
@@ -209,19 +263,22 @@ function parseHouse(el, proj) {
   const pts = el.geometry.map((g) => proj.toXY(g.lat, g.lon));
   const { area, x, y } = polygonAreaCentroid(pts);
   // Untagged "yes" buildings are often sheds or garages: demand a house-like footprint.
-  const [minA, maxA] = t.building === 'yes' ? [70, 600] : [45, 900];
+  // Rows of terraced houses and apartment blocks are bigger.
+  const [minA, maxA] = SIZE[t.building] || HOUSE_SIZE;
   if (area < minA || area > maxA) return null;
   const [lat, lon] = proj.toLatLon(x, y);
   return {
     id: el.id,
     lat, lon, x, y, area,
-    address: formatAddress(t),
+    address: formatAddress(t), street: t['addr:street'],
     outline: el.geometry.map((g) => [g.lat, g.lon]),
+    // Working fields for doors(), dropped once it has run.
+    pts, kind: t.building, flats: parseInt(t['building:flats'], 10) || 0, numbers: new Set(houseNumbers(t['addr:housenumber'])),
   };
 }
 
 function formatAddress(t) {
-  const num = t['addr:housenumber'];
+  const num = t['addr:housenumber']?.replace(/\s*[;,]\s*/g, ', ');
   const st = t['addr:street'];
   if (!num) return null;
   return st ? `${num} ${st}` : num;

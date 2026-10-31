@@ -487,9 +487,9 @@ function renderHaunts() {
     if (old?.sinking) { clearTimeout(old.sinking); old.sinking = 0; old.getElement()?.classList.remove('sinking'); }
     if (old) continue;
     const h = area.houses[i];
-    const m = L.marker([h.lat, h.lon], { icon: hauntIcon(h.id), keyboard: false })
+    const m = L.marker([h.lat, h.lon], { icon: hauntIcon(h.id, '', h.units), keyboard: false })
       .on('click', (e) => { L.DomEvent.stopPropagation(e); pickHouse(i); });
-    if (canHover.matches && h.address) m.bindTooltip(esc(h.address), { direction: 'top' }); // on touch it would cover the pin
+    if (canHover.matches && h.address) m.bindTooltip(esc(h.address) + doorsNote(h), { direction: 'top' }); // on touch it would cover the pin
     haunts.set(i, m.addTo(layers.haunts));
   }
   for (const [i, m] of haunts) {
@@ -784,12 +784,18 @@ function buildHouses() {
   housesFor = area;
 }
 
+// " · 2 doors" for a duplex or a row of houses.
+const doorsNote = (h) => (h.units > 1 ? ` · ${h.units} doors` : '');
+// Doors knocked on along a route (a stop at a duplex is two).
+const doorsOn = (r) => r.stops.reduce((n, i) => n + (area.houses[i]?.units || 1), 0);
+
 function houseTip(h, i) {
   const ov = overrides[h.id];
   const tag = ov === 'star' ? ' ⭐' : ov === 'dark' ? ' 🌑' : '';
-  if (!shown) return `<b>${esc(h.address || 'House')}${tag}</b><br>Tap to start here`;
+  const name = `<b>${esc(h.address || 'House')}${tag}</b>${doorsNote(h)}`;
+  if (!shown) return `${name}<br>Tap to start here`;
   const stops = shown.routes.map((r, ri) => stopOrder[ri]?.get(i) && `Stop ${stopOrder[ri].get(i)} on ${r.label}`).filter(Boolean);
-  return `<b>${h.address || 'House'}${tag}</b>${stops.map((t) => `<br>${t}`).join('')}`;
+  return `${name}${stops.map((t) => `<br>${t}`).join('')}`;
 }
 
 // The followed route's stops fill in its color; the other route's stops get a faint tint.
@@ -962,7 +968,7 @@ function renderPeek(routes, tween) {
   const r = routes[focus];
   $('peek').innerHTML = `<div class="pk-haul"><span class="pk-candy">≈ ${num(`peek:${r.key}`, Math.round(r.candy))}</span>
       <span class="pk-unit">pieces</span></div>
-    <div class="pk-stats">${r.stops.length} houses · ${(r.distM / M_PER_MI).toFixed(2)} mi · ${Math.round(r.totalSec / 60)} min · ${Math.round(r.climbM * FT_PER_M)} ft climb</div>
+    <div class="pk-stats">${doorsOn(r)} doors · ${(r.distM / M_PER_MI).toFixed(2)} mi · ${Math.round(r.totalSec / 60)} min · ${Math.round(r.climbM * FT_PER_M)} ft climb</div>
     ${routes.length > 1 ? `<div class="pk-routes">${routes.map((x, i) => `<button type="button" class="route-chip${i === focus ? ' active' : ''}" data-i="${i}" aria-pressed="${i === focus}">
       <i style="background:${ROUTE_COLORS[i]}"></i>${x.label}</button>`).join('')}</div>` : ''}`;
   $('peek').querySelectorAll('.route-chip').forEach((b) => b.addEventListener('click', () => setFocus(+b.dataset.i)));
@@ -974,7 +980,7 @@ function renderCompare(routes, budgetMin, tween) {
   const two = routes.length > 1;
   // [label, value, decimals, suffix]
   const stats = [
-    ['Houses', (r) => r.stops.length, 0, ''],
+    ['Doors', doorsOn, 0, ''],
     ['Walking', (r) => r.distM / M_PER_MI, 2, ' mi'],
     ['Climb', (r) => Math.round(r.climbM * FT_PER_M), 0, ' ft'],
     ['Time', (r) => Math.round(r.totalSec / 60), 0, ' min'],

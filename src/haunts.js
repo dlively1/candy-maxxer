@@ -104,10 +104,11 @@ export function hauntHtml(id) {
   return `<span class="mist"></span><span class="hb" style="${style}"><svg viewBox="0 0 40 44" aria-hidden="true">${v.body}${smoke(cx, cy)}</svg></span>`;
 }
 
-export function hauntIcon(id, extra = '') {
+// units > 1 (a duplex, a row of houses) adds a little "×2" sign by the door.
+export function hauntIcon(id, extra = '', units = 1) {
   ensureDefs();
   return L.divIcon({
-    className: `haunt${extra}`, html: hauntHtml(id),
+    className: `haunt${extra}`, html: hauntHtml(id) + (units > 1 ? `<span class="hu" aria-hidden="true">×${units}</span>` : ''),
     iconSize: [HAUNT_W, HAUNT_H], iconAnchor: [HAUNT_W / 2, f(41 * SCALE)], tooltipAnchor: [0, -44],
   });
 }

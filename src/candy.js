@@ -2,9 +2,11 @@
 
 export const OVERRIDES = ['normal', 'star', 'dark'];
 
+// Per door; a duplex or a row of houses has several (house.units).
 export function candyValue(house, override = 'normal') {
   if (override === 'dark') return 0;
-  if (override === 'star') return 6; // full-size bar house
-  // Base 2 pieces; bigger footprints skew generous, up to +1.
-  return 2 + Math.min(1, Math.max(0, (house.area - 150) / 350));
+  const units = house.units || 1;
+  if (override === 'star') return 6 * units; // full-size bar house
+  // Base 2 pieces; bigger homes skew generous, up to +1.
+  return units * (2 + Math.min(1, Math.max(0, (house.area / units - 150) / 350)));
 }
