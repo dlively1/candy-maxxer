@@ -23,7 +23,7 @@ and gets you home — with hills priced in.
    the rest across a no-walking highway still works). Each house adds a front-path round trip + porch time.
 5. **Solver** (Web Worker) — orienteering problem: greedy candy-per-second insertion, asymmetric 2-opt,
    relocate, then ~0.4 s of iterated local search (tear out a stretch, rebuild, keep if better).
-6. **Compare** — a second route next to Max Candy: *Easier legs* (climbing is charged against the haul;
+6. **Compare** (optional; one route by default — scroll down and a ghost points at ✏️) — a second route next to Max Candy: *Easier legs* (climbing is charged against the haul;
    least climbing that keeps ≥ 85% of the candy, hidden if it isn't ≥ 10 ft flatter), *Different streets*
    (Max Candy's houses discounted to 10%), or *+30 min*.
 7. **Directions** — chevrons along the followed route (right of travel, so out-and-back streets read as
@@ -43,7 +43,7 @@ Every plan updates the URL, and **Share this route** copies it:
 Links made by the app also carry `at=lat,lon`, the exact start, so they open at the same spot without
 geocoding again.
 
-`walker`: `toddler` | `kid` | `teen` · `compare`: `easy` | `fresh` | `more` | `none` · `min`: 30–180 · `door`: 10–90 s
+`walker`: `toddler` | `kid` | `teen` · `compare`: `none` (default) | `easy` | `fresh` | `more` · `min`: 30–180 · `door`: 10–90 s
 
 ## Run
 

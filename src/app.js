@@ -14,6 +14,7 @@ import { buildSteps, stepText, turnaroundPoints } from './directions.js';
 import { createLoader } from './loader.js';
 import { shareLink } from './share.js';
 import { initPill } from './pill.js';
+import { initAltHint } from './althint.js';
 import { addressBox, locate, reverse, placeLabel } from './address.js';
 import { initSheet } from './sheet.js';
 import { hauntIcon, hauntPeak, haunting } from './haunts.js';
@@ -131,7 +132,26 @@ formBody.addEventListener('transitionend', (e) => {
   if (e.target === formBody && !formBody.inert) formBody.classList.add('settled');
 });
 formBody.classList.add('settled');
-$('planSum').addEventListener('click', () => editing(!document.body.classList.contains('editing')));
+$('planSum').addEventListener('click', () => openSettings(!document.body.classList.contains('editing')));
+// Open (or close) the settings; opening un-sticks the summary, so bring the form back into view.
+function openSettings(on, then) {
+  editing(on);
+  if (!on) return;
+  const p = $('panel').getBoundingClientRect(), f = $('form').getBoundingClientRect();
+  const gap = f.top - p.top - (sheet.mobile ? 64 : 12); // the sheet's grab bar sits over its top
+  if (gap < 0) $('panel').scrollBy({ top: gap, behavior: reduced.matches ? 'auto' : 'smooth' });
+  if (then) setTimeout(then, reduced.matches ? 0 : 420);
+}
+// The ghost's way in: open the settings and make the comparison cards say hello.
+const altHint = initAltHint({
+  panel: $('panel'), summary: $('planSum'), hint: $('altHint'), alt: $('alt'),
+  open: () => openSettings(true, () => {
+    const cards = document.querySelector('.seg.cards');
+    if (sheet.mobile) sheet.to('full');
+    cards.scrollIntoView({ block: 'center', behavior: reduced.matches ? 'auto' : 'smooth' });
+    cards.classList.remove('beckon'); void cards.offsetWidth; cards.classList.add('beckon');
+  }),
+});
 
 function planSummary() {
   const short = $('address').value.split(',')[0].trim() || 'Somewhere';
@@ -694,6 +714,7 @@ async function solveAndDraw(budgetMin, { quiet = !!shown, quick = true } = {}) {
     editing(false);
   }
   draw({ reveal: !quiet, tween: quiet });
+  if (!quiet) altHint.planned();
   status(`Weighed up ${res.routes[0].considered} nearby houses in ${(res.ms / 1000).toFixed(1)} s.` +
     (area.fallback ? ' Map servers were busy, so this used a saved nearby area: it may miss a few streets.' : ''));
   history.replaceState(null, '', linkUrl());

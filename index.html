@@ -23,6 +23,10 @@
 
     <form id="form">
       <button type="button" id="planSum" class="plan-sum" aria-expanded="false" aria-controls="formBody"></button>
+      <button type="button" id="altHint" class="alt-hint" hidden>
+        <span class="ah-bubble">Boo! One route is so lonely… tap <span class="ah-pencil">✏️</span> to summon a second one to compare.</span>
+        <span class="ah-ghost" aria-hidden="true">👻</span>
+      </button>
       <div id="formBody" class="form-wrap"><div>
       <div class="field" id="addrField" data-peek>
         <label for="address">Start address</label>
@@ -54,10 +58,10 @@
       <div class="choice">
         <span class="lab" id="altLab">Compare with</span>
         <select id="alt" hidden>
-          <option value="easy" data-icon="🦵" data-sub="less climbing" selected>Easier legs</option>
+          <option value="none" data-icon="🎯" data-sub="one route" selected>Nothing</option>
+          <option value="easy" data-icon="🦵" data-sub="less climbing">Easier legs</option>
           <option value="fresh" data-icon="🔀" data-sub="other streets">Different streets</option>
           <option value="more" data-icon="⏱️" data-sub="30 more min">More time</option>
-          <option value="none" data-icon="🎯" data-sub="one route">Nothing</option>
         </select>
         <div class="seg cards" data-for="alt" role="radiogroup" aria-labelledby="altLab"></div>
       </div>
