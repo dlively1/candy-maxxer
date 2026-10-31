@@ -11,7 +11,7 @@ and gets you home — with hills priced in.
    type-ahead suggestion (houses already on the map first, then Photon, kept within ~30 km of what's on
    screen unless you type a town), or type an address (US Census geocoder via JSONP, Nominatim fallback).
    The chosen start is kept as is and remembered, so GPS jitter never moves it; drag the 🏠 on a plan to
-   move it and re-plan.
+   move it and re-plan, or tap the 🪦 next to the plan summary to clear everything and pick a new start.
 2. **Houses & streets** — one Overpass (OpenStreetMap) query (600 m, widening to 1.5 km if sparse), raced
    across four public servers and saved in IndexedDB. A saved neighboring download is reused when it
    covers the spot, and stands in when every server is busy.
