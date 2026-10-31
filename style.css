@@ -565,6 +565,7 @@ body.replanning #results, body.replanning .pk-haul { opacity: .5; }
     transition: transform .42s cubic-bezier(.2, .9, .25, 1);
   }
   #panel.dragging { transition: none; }
+  #panel:not([data-snap="full"]) { overflow-y: hidden; } /* below full height, swipes move the sheet */
   #grab {
     display: block; position: sticky; top: 0; z-index: 5; margin: 0 -16px; padding: 8px 16px 6px;
     background: var(--panel); border-radius: 22px 22px 0 0; touch-action: none; cursor: grab; user-select: none;

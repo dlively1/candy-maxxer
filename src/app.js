@@ -137,6 +137,7 @@ $('planSum').addEventListener('click', () => openSettings(!document.body.classLi
 function openSettings(on, then) {
   editing(on);
   if (!on) return;
+  if (sheet.mobile) sheet.to('full'); // the settings sit below the results on a phone
   const p = $('panel').getBoundingClientRect(), f = $('form').getBoundingClientRect();
   const gap = f.top - p.top - (sheet.mobile ? 64 : 12); // the sheet's grab bar sits over its top
   if (gap < 0) $('panel').scrollBy({ top: gap, behavior: reduced.matches ? 'auto' : 'smooth' });
@@ -147,7 +148,6 @@ const altHint = initAltHint({
   panel: $('panel'), summary: $('planSum'), hint: $('altHint'), alt: $('alt'),
   open: () => openSettings(true, () => {
     const cards = document.querySelector('.seg.cards');
-    if (sheet.mobile) sheet.to('full');
     cards.scrollIntoView({ block: 'center', behavior: reduced.matches ? 'auto' : 'smooth' });
     cards.classList.remove('beckon'); void cards.offsetWidth; cards.classList.add('beckon');
   }),
