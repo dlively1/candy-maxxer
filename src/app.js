@@ -133,6 +133,11 @@ formBody.addEventListener('transitionend', (e) => {
 });
 formBody.classList.add('settled');
 $('planSum').addEventListener('click', () => openSettings(!document.body.classList.contains('editing')));
+$('restart').addEventListener('click', () => {
+  const btn = $('restart');
+  btn.classList.add('burying'); // the gravestone sinks, then the plan is gone
+  setTimeout(() => { btn.classList.remove('burying'); startOver(); }, reduced.matches ? 0 : 420);
+});
 // Open (or close) the settings; opening un-sticks the summary, so bring the form back into view.
 function openSettings(on, then) {
   editing(on);
@@ -273,6 +278,31 @@ function leavePick() {
   layers.pick.clearLayers();
   renderHaunts();
   $('pickbar').hidden = true;
+}
+
+// Lay the plan to rest: no route, no start, an empty address box ready for the next one. The
+// neighborhood stays loaded, so a nearby address (or a tap on a house) plans quickly.
+let resets = 0;
+function startOver() {
+  resets++; pickSeq++; solveSeq++; // whatever was loading or planning no longer counts
+  replanning(false);
+  loader.hide({ quick: true });
+  if (phase === 'plan') clearPlan();
+  phase = 'idle';
+  document.body.classList.remove('picking');
+  layers.pick.clearLayers();
+  $('pickbar').hidden = true;
+  start = null;
+  try { localStorage.removeItem(START_KEY); } catch { /* no storage */ }
+  $('address').value = '';
+  $('status').textContent = '';
+  $('status').classList.remove('error');
+  $('status').removeAttribute('data-peek');
+  $('go').disabled = $('planHere').disabled = false;
+  history.replaceState(null, '', location.pathname);
+  area?.houses.forEach(styleHouse);
+  renderHaunts();
+  $('address').focus();
 }
 
 function clearPlan() {
@@ -629,6 +659,7 @@ async function run() {
   if (!address) return;
   const budgetMin = +$('budget').value;
   const picked = start?.label === address ? start : null; // otherwise they typed somewhere new
+  const gen = resets; // started over while this was loading? then drop it
   $('go').disabled = $('planHere').disabled = true;
   // Already loaded, or a background load finished? Then there's nothing to wait for but the
   // solver, and the celebration can be quick.
@@ -647,10 +678,12 @@ async function run() {
       status('Finding address…');
       loader.stage('Finding address…', 0.05);
       const g = await geocode(address);
+      if (gen !== resets) return;
       s = { lat: g.lat, lon: g.lon, label: address };
       setStart(s);
     }
     const next = await areaFor(s, budgetMin);
+    if (gen !== resets) return;
     fitNext ||= next !== area || phase !== 'plan';
     useArea(next);
     const snap = area.net.anchor(...area.proj.toXY(s.lat, s.lon), 400);
@@ -659,6 +692,7 @@ async function run() {
     if (!area.houses.length) throw new Error(NO_HOUSES);
     await solveAndDraw(budgetMin, { quiet, quick: ready || !area.downloaded });
   } catch (e) {
+    if (gen !== resets) return;
     console.error(e);
     status(e.message, true);
     loader.hide();
@@ -744,6 +778,7 @@ function buildHouses() {
       L.DomEvent.stopPropagation(e);
       if (phase === 'plan') toggleHouse(h, i);
       else if (phase === 'pick') pickHouse(i);
+      else chooseStart({ lat: h.lat, lon: h.lon, house: h.id }); // after starting over
     })
     .addTo(layers.houses));
   housesFor = area;

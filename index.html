@@ -22,7 +22,10 @@
     <p class="tag">The most candy per minute.</p>
 
     <form id="form">
-      <button type="button" id="planSum" class="plan-sum" aria-expanded="false" aria-controls="formBody"></button>
+      <div class="plan-row">
+        <button type="button" id="planSum" class="plan-sum" aria-expanded="false" aria-controls="formBody"></button>
+        <button type="button" id="restart" class="rip" title="Start over" aria-label="Start over: clear this plan and pick a new start"><span aria-hidden="true">🪦</span></button>
+      </div>
       <button type="button" id="altHint" class="alt-hint" hidden>
         <span class="ah-bubble">Boo! One route is so lonely… tap <span class="ah-pencil">✏️</span> to summon a second one to compare.</span>
         <span class="ah-ghost" aria-hidden="true">👻</span>
@@ -85,7 +88,7 @@
 
     <footer>
       Find yourself on the map, then tap your house to start there (go near one to see who’s home), or drag the gold pin.
-      Tap a route to follow it, or a step to fly to it. Tap a house to mark it ⭐ full-size or 🌑 dark porch.
+      Tap a route to follow it, or a step to fly to it. Tap a house to mark it ⭐ full-size or 🌑 dark porch. Tap the 🪦 to start over somewhere else.
       Data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>,
       elevation: AWS Terrain Tiles, address search: Photon &amp; US Census.
     </footer>

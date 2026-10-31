@@ -145,7 +145,22 @@ input[type=range]:focus-visible::-moz-range-thumb { filter: var(--corn-shadow) d
 }
 .plan-sum:hover { border-color: var(--ink-3); }
 .plan-sum:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
-body.has-plan .plan-sum { display: flex; }
+.plan-row { display: none; gap: 6px; align-items: stretch; }
+body.has-plan .plan-row { display: flex; }
+body.has-plan .plan-sum { display: flex; min-width: 0; }
+/* Start over: a little gravestone, faded until you reach for it; laying the plan to rest clears it. */
+.rip {
+  flex: none; width: 40px; padding: 0; display: grid; place-items: center; font-size: 17px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
+  transition: border-color .2s, background .2s;
+}
+.rip span { filter: grayscale(1); opacity: .5; transition: filter .25s, opacity .25s, transform .3s cubic-bezier(.3, 1.6, .5, 1); }
+.rip:hover, .rip:focus-visible { border-color: var(--ink-3); background: var(--bg); }
+.rip:hover span, .rip:focus-visible span { filter: none; opacity: 1; transform: translateY(-2px) rotate(-6deg); }
+.rip:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
+.rip.burying span { animation: rip-sink .45s ease-in forwards; }
+@keyframes rip-sink { to { transform: translateY(14px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .rip span { transition: none; } .rip.burying span { animation: none; } }
 .ps-where { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ps-what { flex: 1; min-width: 0; color: var(--ink-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ps-edit { flex: none; transition: transform .3s cubic-bezier(.3, 1.6, .5, 1); }
@@ -169,7 +184,7 @@ body.editing .ps-edit { transform: rotate(-20deg) scale(1.15); }
 
 /* "Boo!": a ghost floats up beside the pencil with a speech bubble; tap it to open the comparison. */
 .alt-hint {
-  position: absolute; z-index: 6; top: calc(100% - 4px); right: 4px; display: flex; align-items: flex-start; gap: 4px;
+  position: absolute; z-index: 6; top: calc(100% - 4px); right: 50px; /* left of the 🪦, under the ✏️ */ display: flex; align-items: flex-start; gap: 4px;
   width: min(292px, calc(100% - 8px)); padding: 0; background: none; border: 0; border-radius: 0; color: inherit;
   text-align: left; cursor: pointer; transform-origin: 92% 0; animation: ah-in .7s cubic-bezier(.2, 1.5, .4, 1) both;
 }
