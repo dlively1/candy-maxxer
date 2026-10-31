@@ -165,6 +165,65 @@ body.has-plan .plan-sum { display: flex; min-width: 0; }
 .ps-what { flex: 1; min-width: 0; color: var(--ink-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ps-edit { flex: none; transition: transform .3s cubic-bezier(.3, 1.6, .5, 1); }
 body.editing .ps-edit { transform: rotate(-20deg) scale(1.15); }
+/* The ghost tickles the pencil while it points at it. */
+.plan-sum.haunted { border-color: #c9b8ff66; box-shadow: 0 0 0 1px #c9b8ff33, 0 0 18px #b9a4ff33; }
+.plan-sum.haunted .ps-edit { animation: pencil-wiggle 1.1s ease-in-out .35s infinite; }
+@keyframes pencil-wiggle {
+  0%, 55%, 100% { transform: none; }
+  10% { transform: rotate(-22deg) scale(1.25); } 22% { transform: rotate(16deg) scale(1.25); }
+  34% { transform: rotate(-10deg) scale(1.15); } 45% { transform: rotate(5deg); }
+}
+/* On desktop the folded plan rides along at the top of the panel as you scroll the results. */
+@media (min-width: 761px) {
+  body.has-plan:not(.editing) #form {
+    position: sticky; top: -20px; z-index: 4; margin: -10px -20px; padding: 10px 20px;
+    background: linear-gradient(#1d1928 82%, #1d192800);
+  }
+}
+#form { position: relative; }
+
+/* "Boo!": a ghost floats up beside the pencil with a speech bubble; tap it to open the comparison. */
+.alt-hint {
+  position: absolute; z-index: 6; top: calc(100% - 4px); right: 50px; /* left of the 🪦, under the ✏️ */ display: flex; align-items: flex-start; gap: 4px;
+  width: min(292px, calc(100% - 8px)); padding: 0; background: none; border: 0; border-radius: 0; color: inherit;
+  text-align: left; cursor: pointer; transform-origin: 92% 0; animation: ah-in .7s cubic-bezier(.2, 1.5, .4, 1) both;
+}
+.alt-hint[hidden] { display: none; }
+.alt-hint.out { animation: ah-out .32s ease-in forwards; }
+.ah-ghost {
+  flex: none; font-size: 32px; line-height: 1; margin-top: -6px; filter: drop-shadow(0 0 8px #e9e2ffcc);
+  animation: ah-float 1.5s ease-in-out infinite alternate;
+}
+.ah-bubble {
+  position: relative; flex: 1; margin-top: 12px; padding: 9px 12px; border-radius: 16px 4px 16px 16px;
+  background: #f6f2ff; color: #231634; font-size: 13px; font-weight: 700; line-height: 1.3;
+  box-shadow: 0 6px 18px #000a, 0 0 22px #b9a4ff55; transition: transform .2s;
+}
+.ah-bubble::after { /* the tail, toward the ghost */
+  content: ''; position: absolute; right: -6px; top: 2px; border: 7px solid transparent; border-left-color: #f6f2ff; border-top-color: #f6f2ff;
+}
+.alt-hint:hover .ah-bubble { transform: scale(1.03); }
+.alt-hint:focus-visible .ah-bubble { outline: 2px solid var(--orange); outline-offset: 2px; }
+.ah-pencil { display: inline-block; animation: pencil-wiggle 1.1s ease-in-out .35s infinite; }
+@keyframes ah-in {
+  0% { transform: translate(18px, -26px) scale(.2) rotate(18deg); opacity: 0; filter: blur(4px); }
+  60% { opacity: 1; filter: blur(0); }
+  100% { transform: none; opacity: 1; }
+}
+@keyframes ah-out { to { transform: translate(14px, -18px) scale(.5) rotate(10deg); opacity: 0; filter: blur(3px); } }
+@keyframes ah-float { from { transform: translateY(3px) rotate(-8deg); } to { transform: translateY(-5px) rotate(7deg); } }
+/* The comparison cards shimmer when the ghost brings you to them. */
+.seg.cards.beckon button:not([aria-checked="true"]) { animation: beckon 1.3s ease-out both; }
+.seg.cards.beckon button:nth-child(3) { animation-delay: .12s; }
+.seg.cards.beckon button:nth-child(4) { animation-delay: .24s; }
+@keyframes beckon {
+  0% { box-shadow: 0 0 0 0 #b9a4ff00; }
+  30% { box-shadow: 0 0 0 3px #b9a4ff88, 0 0 22px #b9a4ff88; border-color: #c9b8ff; }
+  100% { box-shadow: 0 0 0 0 #b9a4ff00; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .alt-hint, .alt-hint.out, .ah-ghost, .ah-pencil, .plan-sum.haunted .ps-edit, .seg.cards.beckon button { animation: none; }
+}
 .form-wrap { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 1fr; transition: grid-template-rows .35s cubic-bezier(.3, .8, .3, 1); }
 .form-wrap > div { min-height: 0; min-width: 0; overflow: hidden; display: flex; flex-direction: column; gap: 14px; }
 .form-wrap.settled > div { overflow: visible; } /* let the address suggestions spill out */
@@ -521,6 +580,7 @@ body.replanning #results, body.replanning .pk-haul { opacity: .5; }
     transition: transform .42s cubic-bezier(.2, .9, .25, 1);
   }
   #panel.dragging { transition: none; }
+  #panel:not([data-snap="full"]) { overflow-y: hidden; } /* below full height, swipes move the sheet */
   #grab {
     display: block; position: sticky; top: 0; z-index: 5; margin: 0 -16px; padding: 8px 16px 6px;
     background: var(--panel); border-radius: 22px 22px 0 0; touch-action: none; cursor: grab; user-select: none;

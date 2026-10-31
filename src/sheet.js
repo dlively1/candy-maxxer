@@ -29,7 +29,7 @@ export function initSheet(panel, grab) {
   const to = (name, animate = true) => {
     if (!MOBILE.matches) return;
     snap = name;
-    if (name === 'peek') panel.scrollTop = 0;
+    if (name !== 'full') panel.scrollTop = 0; // only a full sheet scrolls
     panel.dataset.snap = name;
     place(heights()[name], animate);
   };
@@ -40,25 +40,31 @@ export function initSheet(panel, grab) {
     else { panel.style.transform = ''; panel.classList.remove('dragging'); root.style.removeProperty('--sheet-vis'); root.classList.remove('sheet-high'); vis = 0; }
   };
 
+  // A drag follows the finger; on release it flings or settles to a height.
+  const begin = (y) => { drag = { y, from: vis, lastY: y, lastT: performance.now(), v: 0, moved: false }; };
+  const follow = (y) => {
+    const now = performance.now();
+    drag.v = (drag.lastY - y) / Math.max(1, now - drag.lastT); // px/ms, up is positive
+    drag.lastY = y; drag.lastT = now;
+    if (Math.abs(y - drag.y) > 6) drag.moved = true;
+    if (drag.moved) place(drag.from + (drag.y - y), false);
+  };
+
   grab.addEventListener('pointerdown', (e) => {
     if (!MOBILE.matches || e.target.closest('button')) return;
-    drag = { y: e.clientY, from: vis, t: performance.now(), lastY: e.clientY, lastT: performance.now(), v: 0, moved: false };
+    begin(e.clientY);
     grab.setPointerCapture(e.pointerId);
   });
-  grab.addEventListener('pointermove', (e) => {
-    if (!drag) return;
-    const now = performance.now();
-    drag.v = (drag.lastY - e.clientY) / Math.max(1, now - drag.lastT); // px/ms, up is positive
-    drag.lastY = e.clientY; drag.lastT = now;
-    if (Math.abs(e.clientY - drag.y) > 6) drag.moved = true;
-    if (drag.moved) place(drag.from + (drag.y - e.clientY), false);
-  });
+  grab.addEventListener('pointermove', (e) => { if (drag) follow(e.clientY); });
   const release = () => {
     if (!drag) return;
     const { moved, v } = drag;
     drag = null;
     const h = heights();
     if (!moved) { to(snap === 'peek' ? 'half' : 'peek'); return; }
+    settle(h, v);
+  };
+  const settle = (h, v) => {
     // Fling to the next height in the direction of travel; otherwise settle on the nearest.
     const order = ['peek', 'half', 'full'];
     if (Math.abs(v) > 0.5) {
@@ -70,6 +76,37 @@ export function initSheet(panel, grab) {
   };
   grab.addEventListener('pointerup', release);
   grab.addEventListener('pointercancel', release);
+
+  // The rest of the sheet drags too, like any bottom sheet: below full height a vertical swipe
+  // anywhere moves it (its content doesn't scroll then); at full height the content scrolls, and
+  // pulling down from the top of it brings the sheet down. Sideways gestures (sliders, the
+  // elevation scrubber) are left alone.
+  let touch = null;
+  panel.addEventListener('touchstart', (e) => {
+    if (!MOBILE.matches || e.touches.length > 1 || grab.contains(e.target) || drag) { touch = null; return; }
+    const t = e.touches[0];
+    touch = { x: t.clientX, y: t.clientY, mode: null, free: !!e.target.closest('input[type=range], .plot') };
+  }, { passive: true });
+  panel.addEventListener('touchmove', (e) => {
+    if (!touch) return;
+    const t = e.touches[0], dx = t.clientX - touch.x, dy = t.clientY - touch.y;
+    if (!touch.mode) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < 6) return;
+      const vertical = Math.abs(dy) > Math.abs(dx);
+      touch.mode = !vertical || touch.free ? 'none'
+        : snap !== 'full' || (panel.scrollTop <= 0 && dy > 0) ? 'sheet' : 'scroll';
+      if (touch.mode === 'sheet') { begin(touch.y); drag.moved = true; }
+    }
+    if (touch.mode !== 'sheet') return;
+    if (e.cancelable) e.preventDefault();
+    follow(t.clientY);
+  }, { passive: false });
+  const touchEnd = () => {
+    if (touch?.mode === 'sheet' && drag) { const { v } = drag; drag = null; settle(heights(), v); }
+    touch = null;
+  };
+  panel.addEventListener('touchend', touchEnd);
+  panel.addEventListener('touchcancel', touchEnd);
 
   addEventListener('resize', apply);
   MOBILE.addEventListener('change', apply);
